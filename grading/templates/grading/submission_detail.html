@@ -1,0 +1,75 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{{ submission.student_name }} Review</title>
+  <style>
+    body { font-family: Georgia, serif; margin: 2rem; background: #f6f4ef; color: #222; }
+    .panel { background: #fffdf7; padding: 1rem; border: 1px solid #dfd7c8; border-radius: 8px; margin-bottom: 1rem; }
+    textarea { width: 100%; min-height: 220px; }
+    input[type="text"] { width: 20rem; }
+  </style>
+</head>
+<body>
+  <p><a href="{% url 'grading:assignment_detail' submission.assignment.pk %}">Back to assignment</a></p>
+  <h1>{{ submission.student_name }}</h1>
+
+  {% if messages %}
+    {% for message in messages %}
+      <div>{{ message }}</div>
+    {% endfor %}
+  {% endif %}
+
+  <div class="panel">
+    <h2>Status</h2>
+    <p>AI: {{ submission.ai_status }} | Review: {{ submission.review_status }}</p>
+    <p>Canvas submission id: {{ submission.canvas_submission_id }}</p>
+    <p>Submission type: {{ submission.submission_type }}</p>
+    {% if submission.submission_url %}<p>Submission URL: <a href="{{ submission.submission_url }}">{{ submission.submission_url }}</a></p>{% endif %}
+  </div>
+
+  <div class="panel">
+    <h2>Artifacts</h2>
+    <ul>
+      {% for artifact in submission.artifacts.all %}
+        <li>{{ artifact.artifact_type }}: {{ artifact.local_path }} {% if artifact.source_url %}(<a href="{{ artifact.source_url }}">source</a>){% endif %}</li>
+      {% empty %}
+        <li>No downloaded artifacts.</li>
+      {% endfor %}
+    </ul>
+  </div>
+
+  <div class="panel">
+    <h2>Generate AI Draft</h2>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="generate">
+      <button type="submit">Generate Draft</button>
+    </form>
+  </div>
+
+  <div class="panel">
+    <h2>Review and Approve</h2>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="approve">
+      <p><label>Final score <input type="text" name="final_score" value="{{ submission.final_score|default:submission.proposed_score|default:'' }}"></label></p>
+      <p><label>Final feedback</label></p>
+      <textarea name="final_feedback">{{ submission.final_feedback|default:submission.proposed_feedback }}</textarea>
+      <p><label>Approval notes</label></p>
+      <textarea name="notes"></textarea>
+      <button type="submit">Approve</button>
+    </form>
+  </div>
+
+  <div class="panel">
+    <h2>Post Approved Grade</h2>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="post">
+      <button type="submit">Post to Canvas</button>
+    </form>
+    {% if submission.last_error %}<p>Last error: {{ submission.last_error }}</p>{% endif %}
+  </div>
+</body>
+</html>

@@ -1,0 +1,123 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      image: ${{ steps.meta.outputs.image }}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        id: meta
+        run: |
+          IMAGE="ghcr.io/${{ github.repository }}:${{ github.sha }}"
+          docker build -t "$IMAGE" .
+          docker push "$IMAGE"
+          echo "image=$IMAGE" >> "$GITHUB_OUTPUT"
+
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    environment:
+      name: production
+
+    steps:
+      - name: Copy compose file to VPS
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          source: "docker-compose.prod.yml,deploy/bootstrap-vps.sh"
+          target: "/opt/feedback"
+
+      - name: Deploy on VPS
+        uses: appleboy/ssh-action@v1.0.3
+        env:
+          FEEDBACK_IMAGE: ${{ needs.build.outputs.image }}
+          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
+          GHCR_PAT: ${{ secrets.GHCR_PAT }}
+          FEEDBACK_SECRET_KEY: ${{ secrets.FEEDBACK_SECRET_KEY }}
+          FEEDBACK_ALLOWED_HOSTS: ${{ secrets.FEEDBACK_ALLOWED_HOSTS }}
+          FEEDBACK_CSRF_TRUSTED_ORIGINS: ${{ secrets.FEEDBACK_CSRF_TRUSTED_ORIGINS }}
+          FEEDBACK_AI_API_KEY: ${{ secrets.FEEDBACK_AI_API_KEY }}
+          FEEDBACK_AI_BASE_URL: ${{ secrets.FEEDBACK_AI_BASE_URL }}
+          FEEDBACK_AI_MODEL: ${{ secrets.FEEDBACK_AI_MODEL }}
+          FEEDBACK_AI_TEMPERATURE: ${{ secrets.FEEDBACK_AI_TEMPERATURE }}
+          CANVAS_API_URL: ${{ secrets.CANVAS_API_URL }}
+          CANVAS_API_KEY: ${{ secrets.CANVAS_API_KEY }}
+          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
+          FEEDBACK_BIND_PORT: ${{ secrets.FEEDBACK_BIND_PORT }}
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          envs: FEEDBACK_IMAGE,GHCR_USERNAME,GHCR_PAT,FEEDBACK_SECRET_KEY,FEEDBACK_ALLOWED_HOSTS,FEEDBACK_CSRF_TRUSTED_ORIGINS,FEEDBACK_AI_API_KEY,FEEDBACK_AI_BASE_URL,FEEDBACK_AI_MODEL,FEEDBACK_AI_TEMPERATURE,CANVAS_API_URL,CANVAS_API_KEY,POSTGRES_USER,POSTGRES_PASSWORD,POSTGRES_DB,FEEDBACK_BIND_PORT
+          script: |
+            set -eu
+            mkdir -p /opt/feedback
+
+            chmod +x /opt/feedback/deploy/bootstrap-vps.sh
+            /opt/feedback/deploy/bootstrap-vps.sh
+
+            cat > /opt/feedback/.env <<EOF
+            FEEDBACK_IMAGE=${FEEDBACK_IMAGE}
+            FEEDBACK_SECRET_KEY=${FEEDBACK_SECRET_KEY}
+            FEEDBACK_ALLOWED_HOSTS=${FEEDBACK_ALLOWED_HOSTS}
+            FEEDBACK_CSRF_TRUSTED_ORIGINS=${FEEDBACK_CSRF_TRUSTED_ORIGINS}
+            FEEDBACK_AI_API_KEY=${FEEDBACK_AI_API_KEY}
+            FEEDBACK_AI_BASE_URL=${FEEDBACK_AI_BASE_URL}
+            FEEDBACK_AI_MODEL=${FEEDBACK_AI_MODEL}
+            FEEDBACK_AI_TEMPERATURE=${FEEDBACK_AI_TEMPERATURE}
+            CANVAS_API_URL=${CANVAS_API_URL}
+            CANVAS_API_KEY=${CANVAS_API_KEY}
+            POSTGRES_USER=${POSTGRES_USER}
+            POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+            POSTGRES_DB=${POSTGRES_DB}
+            FEEDBACK_BIND_PORT=${FEEDBACK_BIND_PORT:-18080}
+            EOF
+
+            docker login ghcr.io -u "${GHCR_USERNAME}" -p "${GHCR_PAT}"
+            cd /opt/feedback
+            docker compose --env-file .env -f docker-compose.prod.yml pull
+            docker compose --env-file .env -f docker-compose.prod.yml up -d
+
+            BIND_PORT="${FEEDBACK_BIND_PORT:-18080}"
+            HEALTH_URL="http://127.0.0.1:${BIND_PORT}/healthz/"
+            for attempt in $(seq 1 30); do
+              if curl -fsS "${HEALTH_URL}" >/dev/null; then
+                echo "Health check passed at ${HEALTH_URL}"
+                break
+              fi
+
+              if [[ "${attempt}" -eq 30 ]]; then
+                echo "Health check failed after ${attempt} attempts"
+                docker compose --env-file .env -f docker-compose.prod.yml logs app --tail=200
+                exit 1
+              fi
+
+              sleep 2
+            done
+
+            docker image prune -f

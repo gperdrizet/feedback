@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>{{ assignment.name }}</title>
+  <style>
+    body { font-family: Georgia, serif; margin: 2rem; background: #f6f4ef; color: #222; }
+    table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
+    th, td { padding: 0.6rem; border-bottom: 1px solid #d8d0c0; text-align: left; }
+    a { color: #8a3200; }
+  </style>
+</head>
+<body>
+  <p><a href="{% url 'grading:gradebook' %}">Back to gradebook</a></p>
+  <h1>{{ assignment.name }}</h1>
+  <p>Course: {{ assignment.course.name }} | Points: {{ assignment.points_possible }}</p>
+
+  <table>
+    <thead>
+      <tr>
+        <th>Student</th>
+        <th>AI Status</th>
+        <th>Review Status</th>
+        <th>Proposed Score</th>
+        <th>Final Score</th>
+        <th>Review</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for submission in submissions %}
+      <tr>
+        <td>{{ submission.student_name }}</td>
+        <td>{{ submission.ai_status }}</td>
+        <td>{{ submission.review_status }}</td>
+        <td>{{ submission.proposed_score }}</td>
+        <td>{{ submission.final_score }}</td>
+        <td><a href="{% url 'grading:submission_detail' submission.pk %}">Open</a></td>
+      </tr>
+      {% empty %}
+      <tr><td colspan="6">No submissions synced.</td></tr>
+      {% endfor %}
+    </tbody>
+  </table>
+</body>
+</html>

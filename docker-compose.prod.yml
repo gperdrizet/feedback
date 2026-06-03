@@ -1,0 +1,41 @@
+services:
+  app:
+    image: ${FEEDBACK_IMAGE}
+    restart: unless-stopped
+    depends_on:
+      - db
+    environment:
+      DATABASE_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB}
+      FEEDBACK_SECRET_KEY: ${FEEDBACK_SECRET_KEY}
+      FEEDBACK_DEBUG: "false"
+      FEEDBACK_ALLOWED_HOSTS: ${FEEDBACK_ALLOWED_HOSTS}
+      FEEDBACK_CSRF_TRUSTED_ORIGINS: ${FEEDBACK_CSRF_TRUSTED_ORIGINS}
+      FEEDBACK_AI_API_KEY: ${FEEDBACK_AI_API_KEY}
+      FEEDBACK_AI_BASE_URL: ${FEEDBACK_AI_BASE_URL}
+      FEEDBACK_AI_MODEL: ${FEEDBACK_AI_MODEL}
+      FEEDBACK_AI_TEMPERATURE: ${FEEDBACK_AI_TEMPERATURE}
+      CANVAS_API_URL: ${CANVAS_API_URL}
+      CANVAS_API_KEY: ${CANVAS_API_KEY}
+      FEEDBACK_SESSION_COOKIE_SECURE: "true"
+      FEEDBACK_CSRF_COOKIE_SECURE: "true"
+      FEEDBACK_SECURE_SSL_REDIRECT: "false"
+    volumes:
+      - submissions_data:/app/submissions
+      - staticfiles_data:/app/staticfiles
+    ports:
+      - "127.0.0.1:${FEEDBACK_BIND_PORT:-18080}:8000"
+
+  db:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+
+volumes:
+  postgres_data:
+  submissions_data:
+  staticfiles_data:
