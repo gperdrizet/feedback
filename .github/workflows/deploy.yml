@@ -44,6 +44,17 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Prepare target directory on VPS
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          port: ${{ secrets.VPS_PORT }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          script: |
+            sudo mkdir -p /opt/feedback/deploy
+            sudo chown -R "$USER:$USER" /opt/feedback
+
       - name: Copy compose file to VPS
         uses: appleboy/scp-action@v0.1.7
         with:
