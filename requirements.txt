@@ -4,4 +4,5 @@ python-dotenv>=1.0.0
 openai>=2.40.0
 dj-database-url>=2.2.0
 psycopg[binary]>=3.2.0
-canvas-instructor-tools @ git+https://github.com/gperdrizet/canvas-instructor-tools.git@main
+canvasapi>=3.0.0
+requests>=2.31.0

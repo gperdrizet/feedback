@@ -1,160 +1,168 @@
 """Canvas sync services that consume canvas-instructor-tools APIs."""
 
+import os
 from datetime import datetime
 from pathlib import Path
 
 import requests
+from canvasapi import Canvas
+from dotenv import load_dotenv
 from django.utils import timezone
 
-try:
-    from canvas_tools import post_submission_grade  # type: ignore[attr-defined]
-except ImportError:
-    from canvas_tools.client import get_client as _legacy_get_client
+def _get_canvas_client():
+    try:
+        from canvas_tools.client import get_client as package_get_client
 
-    def post_submission_grade(course_id, assignment_id, user_id, posted_grade, comment=None):
-        canvas = _legacy_get_client()
-        course = canvas.get_course(course_id)
-        assignment = course.get_assignment(assignment_id)
-        submission = assignment.get_submission(user_id)
+        return package_get_client()
+    except ImportError:
+        load_dotenv()
+        api_url = os.getenv("CANVAS_API_URL")
+        api_key = os.getenv("CANVAS_API_KEY")
+        if not api_url or not api_key:
+            raise ValueError("Missing CANVAS_API_URL or CANVAS_API_KEY.")
+        return Canvas(api_url, api_key)
 
-        payload = {"submission": {"posted_grade": posted_grade}}
-        if comment:
-            payload["comment"] = {"text_comment": comment}
 
-        updated = submission.edit(**payload)
-        return {
-            "success": True,
-            "course_id": course_id,
-            "assignment_id": assignment_id,
-            "user_id": user_id,
-            "posted_grade": posted_grade,
-            "comment": comment,
-            "canvas_response": updated,
-        }
+def post_submission_grade(course_id, assignment_id, user_id, posted_grade, comment=None):
+    canvas = _get_canvas_client()
+    course = canvas.get_course(course_id)
+    assignment = course.get_assignment(assignment_id)
+    submission = assignment.get_submission(user_id)
 
-try:
-    from canvas_tools import (  # type: ignore[attr-defined]
-        download_submission_artifacts,
-        get_assignment_description,
-        list_assignment_submissions,
-    )
-except ImportError:
-    from canvas_tools.client import get_client
+    payload = {"submission": {"posted_grade": posted_grade}}
+    if comment:
+        payload["comment"] = {"text_comment": comment}
 
-    def list_assignment_submissions(course_id, assignment_id, include_history=True):
-        canvas = get_client()
-        course = canvas.get_course(course_id)
-        assignment = course.get_assignment(assignment_id)
-        include = ["user"]
-        if include_history:
-            include.append("submission_history")
+    updated = submission.edit(**payload)
+    return {
+        "success": True,
+        "course_id": course_id,
+        "assignment_id": assignment_id,
+        "user_id": user_id,
+        "posted_grade": posted_grade,
+        "comment": comment,
+        "canvas_response": updated,
+    }
 
-        payloads = []
-        for submission in assignment.get_submissions(include=include):
-            user = getattr(submission, "user", None)
-            attachments = []
-            for attachment in getattr(submission, "attachments", []) or []:
-                attachments.append(
-                    {
-                        "display_name": getattr(attachment, "display_name", None),
-                        "url": getattr(attachment, "url", None),
-                    }
-                )
 
-            payloads.append(
+def list_assignment_submissions(course_id, assignment_id, include_history=True):
+    canvas = _get_canvas_client()
+    course = canvas.get_course(course_id)
+    assignment = course.get_assignment(assignment_id)
+    include = ["user"]
+    if include_history:
+        include.append("submission_history")
+
+    payloads = []
+    for submission in assignment.get_submissions(include=include):
+        user = getattr(submission, "user", None)
+        attachments = []
+        for attachment in getattr(submission, "attachments", []) or []:
+            attachments.append(
                 {
-                    "id": getattr(submission, "id", None),
-                    "user_id": getattr(submission, "user_id", None),
-                    "submission_type": getattr(submission, "submission_type", None),
-                    "workflow_state": getattr(submission, "workflow_state", None),
-                    "submitted_at": getattr(submission, "submitted_at", None),
-                    "url": getattr(submission, "url", None),
-                    "user": {
-                        "id": user.get("id") if isinstance(user, dict) else None,
-                        "name": user.get("name") if isinstance(user, dict) else None,
-                    },
-                    "attachments": attachments,
+                    "display_name": getattr(attachment, "display_name", None),
+                    "url": getattr(attachment, "url", None),
                 }
             )
 
-        return payloads
+        payloads.append(
+            {
+                "id": getattr(submission, "id", None),
+                "user_id": getattr(submission, "user_id", None),
+                "submission_type": getattr(submission, "submission_type", None),
+                "workflow_state": getattr(submission, "workflow_state", None),
+                "submitted_at": getattr(submission, "submitted_at", None),
+                "url": getattr(submission, "url", None),
+                "user": {
+                    "id": user.get("id") if isinstance(user, dict) else None,
+                    "name": user.get("name") if isinstance(user, dict) else None,
+                },
+                "attachments": attachments,
+            }
+        )
 
-    def get_assignment_description(course_id, assignment_id):
-        canvas = get_client()
-        course = canvas.get_course(course_id)
-        assignment = course.get_assignment(assignment_id)
-        return {
-            "id": assignment.id,
-            "name": assignment.name,
-            "description": getattr(assignment, "description", "") or "",
-            "points_possible": getattr(assignment, "points_possible", None),
-            "due_at": getattr(assignment, "due_at", None),
-        }
+    return payloads
 
-    def _download_file(url, destination_path):
-        response = requests.get(url, timeout=30)
-        response.raise_for_status()
-        with open(destination_path, "wb") as f:
-            f.write(response.content)
 
-    def _safe_filename(name):
-        return (name or "artifact").replace("/", "-").replace(" ", "_")
+def get_assignment_description(course_id, assignment_id):
+    canvas = _get_canvas_client()
+    course = canvas.get_course(course_id)
+    assignment = course.get_assignment(assignment_id)
+    return {
+        "id": assignment.id,
+        "name": assignment.name,
+        "description": getattr(assignment, "description", "") or "",
+        "points_possible": getattr(assignment, "points_possible", None),
+        "due_at": getattr(assignment, "due_at", None),
+    }
 
-    def download_submission_artifacts(course_id, assignment_id, output_dir=".", include_links=True):
-        canvas = get_client()
-        course = canvas.get_course(course_id)
-        assignment = course.get_assignment(assignment_id)
 
-        Path(output_dir).mkdir(parents=True, exist_ok=True)
+def _download_file(url, destination_path):
+    response = requests.get(url, timeout=30)
+    response.raise_for_status()
+    with open(destination_path, "wb") as f:
+        f.write(response.content)
 
-        result = {"downloaded_count": 0, "errors": [], "artifacts": []}
-        submissions = assignment.get_submissions(include=["user", "submission_history"])
 
-        for submission in submissions:
-            user = getattr(submission, "user", None)
-            user_name = "unknown_user"
-            if isinstance(user, dict):
-                user_name = _safe_filename(user.get("name", user_name))
+def _safe_filename(name):
+    return (name or "artifact").replace("/", "-").replace(" ", "_")
 
-            for attachment in getattr(submission, "attachments", []) or []:
-                original_filename = getattr(attachment, "display_name", "attachment.bin")
-                file_path = str(Path(output_dir) / f"{user_name}_{_safe_filename(original_filename)}")
 
+def download_submission_artifacts(course_id, assignment_id, output_dir=".", include_links=True):
+    canvas = _get_canvas_client()
+    course = canvas.get_course(course_id)
+    assignment = course.get_assignment(assignment_id)
+
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+    result = {"downloaded_count": 0, "errors": [], "artifacts": []}
+    submissions = assignment.get_submissions(include=["user", "submission_history"])
+
+    for submission in submissions:
+        user = getattr(submission, "user", None)
+        user_name = "unknown_user"
+        if isinstance(user, dict):
+            user_name = _safe_filename(user.get("name", user_name))
+
+        for attachment in getattr(submission, "attachments", []) or []:
+            original_filename = getattr(attachment, "display_name", "attachment.bin")
+            file_path = str(Path(output_dir) / f"{user_name}_{_safe_filename(original_filename)}")
+
+            try:
+                _download_file(getattr(attachment, "url"), file_path)
+                result["downloaded_count"] += 1
+                result["artifacts"].append(
+                    {
+                        "submission_id": getattr(submission, "id", None),
+                        "user_id": getattr(submission, "user_id", None),
+                        "kind": "attachment",
+                        "source_url": getattr(attachment, "url", None),
+                        "local_path": file_path,
+                    }
+                )
+            except (requests.RequestException, OSError) as exc:
+                result["errors"].append({"submission_id": getattr(submission, "id", None), "error": str(exc)})
+
+        if include_links and getattr(submission, "submission_type", None) == "online_url":
+            submission_url = getattr(submission, "url", None)
+            if submission_url:
+                link_path = str(Path(output_dir) / f"{user_name}_online_url")
                 try:
-                    _download_file(getattr(attachment, "url"), file_path)
+                    _download_file(submission_url, link_path)
                     result["downloaded_count"] += 1
                     result["artifacts"].append(
                         {
                             "submission_id": getattr(submission, "id", None),
                             "user_id": getattr(submission, "user_id", None),
-                            "kind": "attachment",
-                            "source_url": getattr(attachment, "url", None),
-                            "local_path": file_path,
+                            "kind": "online_url",
+                            "source_url": submission_url,
+                            "local_path": link_path,
                         }
                     )
                 except (requests.RequestException, OSError) as exc:
                     result["errors"].append({"submission_id": getattr(submission, "id", None), "error": str(exc)})
 
-            if include_links and getattr(submission, "submission_type", None) == "online_url":
-                submission_url = getattr(submission, "url", None)
-                if submission_url:
-                    link_path = str(Path(output_dir) / f"{user_name}_online_url")
-                    try:
-                        _download_file(submission_url, link_path)
-                        result["downloaded_count"] += 1
-                        result["artifacts"].append(
-                            {
-                                "submission_id": getattr(submission, "id", None),
-                                "user_id": getattr(submission, "user_id", None),
-                                "kind": "online_url",
-                                "source_url": submission_url,
-                                "local_path": link_path,
-                            }
-                        )
-                    except (requests.RequestException, OSError) as exc:
-                        result["errors"].append({"submission_id": getattr(submission, "id", None), "error": str(exc)})
-
-        return result
+    return result
 
 from grading.models import (
     AIFeedbackDraft,
