@@ -90,7 +90,25 @@ DATABASES = {
 
 database_url = os.getenv("DATABASE_URL")
 if database_url:
-    DATABASES["default"] = dj_database_url.parse(database_url, conn_max_age=600)
+    try:
+        DATABASES["default"] = dj_database_url.parse(database_url, conn_max_age=600)
+    except dj_database_url.ParseError:
+        # Fall through to explicit POSTGRES_* settings if URL is malformed.
+        pass
+
+postgres_user = os.getenv("POSTGRES_USER")
+postgres_password = os.getenv("POSTGRES_PASSWORD")
+postgres_db = os.getenv("POSTGRES_DB")
+if postgres_user and postgres_password and postgres_db:
+    DATABASES["default"] = {
+        "ENGINE": "django.db.backends.postgresql",
+        "NAME": postgres_db,
+        "USER": postgres_user,
+        "PASSWORD": postgres_password,
+        "HOST": os.getenv("POSTGRES_HOST", "localhost"),
+        "PORT": os.getenv("POSTGRES_PORT", "5432"),
+        "CONN_MAX_AGE": 600,
+    }
 
 
 # Password validation
