@@ -61,6 +61,15 @@ def _is_notebook_reference(value):
 	return path.lower().endswith(".ipynb")
 
 
+def _is_python_reference(value):
+	if not value:
+		return False
+
+	parsed = urlparse(value)
+	path = parsed.path if parsed.scheme else value
+	return path.lower().endswith(".py")
+
+
 _PYGMENTS_CSS = HtmlFormatter(style="default").get_style_defs(".highlight")
 
 
@@ -129,6 +138,18 @@ def _load_notebook_payload(source_kind, source_value):
 	return response.json()
 
 
+def _load_text_payload(source_kind, source_value):
+	if source_kind == "local_path":
+		path = Path(source_value)
+		if not path.exists() or path.is_dir():
+			return None
+		return path.read_text(encoding="utf-8", errors="ignore")
+
+	response = requests.get(source_value, timeout=30)
+	response.raise_for_status()
+	return response.text
+
+
 def _build_notebook_preview(submission, max_cells=60):
 	for source_kind, source_value in _coerce_submission_sources(submission):
 		if not _is_notebook_reference(source_value):
@@ -173,6 +194,8 @@ def _build_notebook_preview(submission, max_cells=60):
 			)
 
 		return {
+			"kind": "notebook",
+			"title": "Submission",
 			"source": source_value,
 			"cell_count": len(raw_cells),
 			"truncated": len(raw_cells) > len(cells),
@@ -181,6 +204,43 @@ def _build_notebook_preview(submission, max_cells=60):
 		}
 
 	return None
+
+
+def _build_python_preview(submission):
+	for source_kind, source_value in _coerce_submission_sources(submission):
+		if not _is_python_reference(source_value):
+			continue
+
+		try:
+			code = _load_text_payload(source_kind, source_value)
+		except (OSError, requests.RequestException):
+			continue
+
+		if code is None:
+			continue
+
+		return {
+			"kind": "script",
+			"title": "Submission",
+			"source": source_value,
+			"cell_count": 1,
+			"truncated": False,
+			"cells": [
+				{
+					"cell_type": "code",
+					"title": "Python",
+					"rendered_html": _render_code_cell(code, language="python"),
+					"output_html": None,
+				}
+			],
+			"pygments_css": _PYGMENTS_CSS,
+		}
+
+	return None
+
+
+def _build_submission_preview(submission):
+	return _build_notebook_preview(submission) or _build_python_preview(submission)
 
 
 def gradebook(request):
@@ -327,7 +387,7 @@ def submission_detail(request, submission_pk):
 			"ordered_submissions": ordered_submissions,
 			"previous_submission_pk": previous_submission_pk,
 			"next_submission_pk": next_submission_pk,
-			"notebook_preview": _build_notebook_preview(submission),
+			"submission_preview": _build_submission_preview(submission),
 		},
 	)
 

@@ -133,7 +133,7 @@ class ReviewWorkflowTests(TestCase):
 
 		response = self.client.get(reverse("grading:submission_detail", args=[notebook_submission.pk]))
 
-		self.assertContains(response, "Notebook Preview")
+		self.assertContains(response, "Submission")
 		self.assertContains(response, "Notebook Title")
 		self.assertContains(response, "Hello")
 		self.assertContains(response, "print")
@@ -162,6 +162,31 @@ class ReviewWorkflowTests(TestCase):
 
 		response = self.client.get(reverse("grading:submission_detail", args=[linked_submission.pk]))
 
-		self.assertContains(response, "Notebook Preview")
+		self.assertContains(response, "Submission")
 		self.assertContains(response, "Linked notebook")
 		mock_get.assert_called_once_with("https://example.com/student-notebook.ipynb", timeout=30)
+
+	def test_submission_review_renders_local_python_artifact(self):
+		script_path = Path(self.tempdir.name) / "main.py"
+		script_path.write_text("def greet(name):\n    return f'hi {name}'\n", encoding="utf-8")
+
+		script_submission = SubmissionRecord.objects.create(
+			assignment=self.assignment,
+			canvas_submission_id=6,
+			canvas_user_id=16,
+			student_name="Fern",
+			proposed_score=Decimal("90.00"),
+			proposed_feedback="Good script.",
+		)
+		SubmissionArtifact.objects.create(
+			submission=script_submission,
+			artifact_type=SubmissionArtifact.ArtifactType.ATTACHMENT,
+			local_path=str(script_path),
+		)
+
+		response = self.client.get(reverse("grading:submission_detail", args=[script_submission.pk]))
+
+		self.assertContains(response, "Submission")
+		self.assertContains(response, "Python cell")
+		self.assertContains(response, "greet")
+		self.assertContains(response, "highlight")

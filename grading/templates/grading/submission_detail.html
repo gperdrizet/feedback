@@ -19,8 +19,8 @@
     .listless { list-style: none; padding-left: 0; margin: 0; }
     .listless li { margin: 0.35rem 0; }
     .meta { font-size: 0.95rem; }
-    .notebook-preview { }
-    .notebook-preview-note { margin-top: 0.25rem; }
+    .submission-preview { }
+    .submission-preview-note { margin-top: 0.25rem; }
     .notebook-cell { padding: 0.85rem; border: 1px solid #e4dac7; border-radius: 8px; margin-top: 0.75rem; background: #fff; }
     .notebook-cell-header { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; color: #8a3200; margin-bottom: 0.5rem; }
     .notebook-cell-body { line-height: 1.45; }
@@ -52,7 +52,7 @@
       .workspace-panel { min-height: auto; max-height: none; overflow: visible; }
       textarea { min-height: 240px; }
     }
-    {% if notebook_preview %}{{ notebook_preview.pygments_css }}{% endif %}
+    {% if submission_preview %}{{ submission_preview.pygments_css }}{% endif %}
   </style>
 </head>
 <body>
@@ -72,11 +72,11 @@
 
   <div class="workspace">
     <section class="workspace-notebook-column">
-      {% if notebook_preview %}
-      <div class="panel notebook-preview workspace-panel">
-        <h2>Notebook Preview</h2>
-        <p class="muted notebook-preview-note">Rendered from {{ notebook_preview.source }} · {{ notebook_preview.cell_count }} cells{% if notebook_preview.truncated %} · preview truncated{% endif %}</p>
-        {% for cell in notebook_preview.cells %}
+      {% if submission_preview %}
+      <div class="panel submission-preview workspace-panel">
+        <h2>{{ submission_preview.title }}</h2>
+        <p class="muted submission-preview-note">Rendered from {{ submission_preview.source }} · {{ submission_preview.cell_count }} section{% if submission_preview.cell_count != 1 %}s{% endif %}{% if submission_preview.truncated %} · preview truncated{% endif %}</p>
+        {% for cell in submission_preview.cells %}
           <div class="notebook-cell notebook-cell-{{ cell.cell_type }}">
             <div class="notebook-cell-header">{{ cell.title }} cell</div>
             <div class="notebook-cell-body">{{ cell.rendered_html }}</div>
@@ -88,8 +88,8 @@
       </div>
       {% else %}
       <div class="panel workspace-panel">
-        <h2>Notebook Preview</h2>
-        <p class="muted">No notebook found for this submission.</p>
+        <h2>Submission</h2>
+        <p class="muted">No previewable submission file found.</p>
       </div>
       {% endif %}
     </section>
