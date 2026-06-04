@@ -10,6 +10,22 @@ from grading.services.canvas_sync import (
 )
 
 
+def _ordered_assignment_submissions(assignment):
+	return assignment.submissions.all().order_by("student_name", "canvas_submission_id")
+
+
+def _neighboring_submission_ids(submissions, current_submission_id):
+	submission_ids = [submission.pk for submission in submissions]
+	try:
+		current_index = submission_ids.index(current_submission_id)
+	except ValueError:
+		return None, None
+
+	previous_id = submission_ids[current_index - 1] if current_index > 0 else None
+	next_id = submission_ids[current_index + 1] if current_index < len(submission_ids) - 1 else None
+	return previous_id, next_id
+
+
 def gradebook(request):
 	assignments = AssignmentConfig.objects.select_related("course").prefetch_related("submissions")
 	return render(request, "grading/gradebook.html", {"assignments": assignments})
@@ -40,8 +56,49 @@ def sync_assignment(request):
 
 
 def assignment_detail(request, assignment_pk):
-	assignment = get_object_or_404(AssignmentConfig.objects.select_related("course"), pk=assignment_pk)
-	submissions = assignment.submissions.all().order_by("student_name")
+	assignment = get_object_or_404(
+		AssignmentConfig.objects.select_related("course").prefetch_related("submissions"),
+		pk=assignment_pk,
+	)
+
+	if request.method == "POST":
+		action = request.POST.get("action")
+		if action == "batch_review":
+			try:
+				sync_assignment_from_canvas(
+					course_id=assignment.course.canvas_course_id,
+					assignment_id=assignment.canvas_assignment_id,
+					download_root="submissions",
+				)
+
+				refreshed_assignment = get_object_or_404(
+					AssignmentConfig.objects.select_related("course").prefetch_related("submissions"),
+					pk=assignment_pk,
+				)
+				submissions = list(_ordered_assignment_submissions(refreshed_assignment))
+				generated_count = 0
+				failed_count = 0
+				for submission in submissions:
+					try:
+						generate_ai_draft(submission)
+						generated_count += 1
+					except Exception as exc:  # noqa: BLE001
+						failed_count += 1
+						messages.error(request, f"{submission.student_name}: {exc}")
+
+				messages.success(
+					request,
+					f"Downloaded submissions and generated AI drafts for {generated_count} students."
+					+ (f" {failed_count} failed." if failed_count else ""),
+				)
+				if submissions:
+					return redirect("grading:submission_detail", submission_pk=submissions[0].pk)
+			except Exception as exc:  # noqa: BLE001
+				messages.error(request, f"Batch review failed: {exc}")
+
+		return redirect("grading:assignment_detail", assignment_pk=assignment.pk)
+
+	submissions = _ordered_assignment_submissions(assignment)
 	return render(
 		request,
 		"grading/assignment_detail.html",
@@ -59,6 +116,11 @@ def submission_detail(request, submission_pk):
 		),
 		pk=submission_pk,
 	)
+	ordered_submissions = list(_ordered_assignment_submissions(submission.assignment))
+	previous_submission_pk, next_submission_pk = _neighboring_submission_ids(
+		ordered_submissions,
+		submission.pk,
+	)
 
 	if request.method == "POST":
 		action = request.POST.get("action")
@@ -66,6 +128,12 @@ def submission_detail(request, submission_pk):
 			if action == "generate":
 				generate_ai_draft(submission)
 				messages.success(request, "AI draft generated.")
+			elif action == "save":
+				submission.final_feedback = request.POST.get("final_feedback", submission.final_feedback)
+				final_score_raw = request.POST.get("final_score", "").strip()
+				submission.final_score = final_score_raw or submission.final_score or submission.proposed_score
+				submission.save(update_fields=["final_feedback", "final_score"])
+				messages.success(request, "Review saved.")
 			elif action == "approve":
 				submission.final_feedback = request.POST.get("final_feedback", submission.proposed_feedback)
 				final_score_raw = request.POST.get("final_score", "").strip()
@@ -78,6 +146,15 @@ def submission_detail(request, submission_pk):
 				)
 				messages.success(request, "Submission approved and queued for posting.")
 			elif action == "post":
+				submission.final_feedback = request.POST.get("final_feedback", submission.final_feedback or submission.proposed_feedback)
+				final_score_raw = request.POST.get("final_score", "").strip()
+				submission.final_score = final_score_raw or submission.final_score or submission.proposed_score
+				submission.save(update_fields=["final_feedback", "final_score"])
+				approve_submission(
+					submission,
+					instructor_username=request.user.username if request.user.is_authenticated else "local-admin",
+					notes=request.POST.get("notes", ""),
+				)
 				post_submission_to_canvas(submission)
 				messages.success(request, "Submission posted to Canvas.")
 		except Exception as exc:  # noqa: BLE001
@@ -85,5 +162,14 @@ def submission_detail(request, submission_pk):
 
 		return redirect("grading:submission_detail", submission_pk=submission.pk)
 
-	return render(request, "grading/submission_detail.html", {"submission": submission})
+	return render(
+		request,
+		"grading/submission_detail.html",
+		{
+			"submission": submission,
+			"ordered_submissions": ordered_submissions,
+			"previous_submission_pk": previous_submission_pk,
+			"next_submission_pk": next_submission_pk,
+		},
+	)
 

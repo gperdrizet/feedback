@@ -8,12 +8,34 @@
     table { width: 100%; border-collapse: collapse; margin-top: 1rem; }
     th, td { padding: 0.6rem; border-bottom: 1px solid #d8d0c0; text-align: left; }
     a { color: #8a3200; }
+    .panel { background: #fffdf7; padding: 1rem; border: 1px solid #dfd7c8; border-radius: 8px; margin-bottom: 1rem; }
+    .actions { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; }
+    .button { display: inline-block; padding: 0.5rem 0.85rem; border: 1px solid #8a3200; border-radius: 6px; background: #fff6ee; text-decoration: none; color: #8a3200; }
+    .button.primary { background: #8a3200; color: #fff; }
   </style>
 </head>
 <body>
   <p><a href="{% url 'grading:gradebook' %}">Back to gradebook</a></p>
   <h1>{{ assignment.name }}</h1>
   <p>Course: {{ assignment.course.name }} | Points: {{ assignment.points_possible }}</p>
+
+  {% if messages %}
+    <div class="messages">
+      {% for message in messages %}
+        <div>{{ message }}</div>
+      {% endfor %}
+    </div>
+  {% endif %}
+
+  <div class="panel">
+    <h2>Batch Review</h2>
+    <p>Download the latest submissions from Canvas and generate AI drafts for every synced submission.</p>
+    <form method="post" class="actions">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="batch_review">
+      <button type="submit" class="button primary">Batch Download &amp; Generate Drafts</button>
+    </form>
+  </div>
 
   <table>
     <thead>
@@ -34,7 +56,7 @@
         <td>{{ submission.review_status }}</td>
         <td>{{ submission.proposed_score }}</td>
         <td>{{ submission.final_score }}</td>
-        <td><a href="{% url 'grading:submission_detail' submission.pk %}">Open</a></td>
+        <td><a href="{% url 'grading:submission_detail' submission.pk %}">Review</a></td>
       </tr>
       {% empty %}
       <tr><td colspan="6">No submissions synced.</td></tr>
