@@ -58,8 +58,8 @@ jobs:
         uses: appleboy/ssh-action@v1.0.3
         env:
           FEEDBACK_IMAGE: ${{ needs.build.outputs.image }}
-          GHCR_USERNAME: ${{ secrets.GHCR_USERNAME }}
-          GHCR_PAT: ${{ secrets.GHCR_PAT }}
+          GHCR_USERNAME: ${{ github.actor }}
+          GHCR_PAT: ${{ github.token }}
           FEEDBACK_SECRET_KEY: ${{ secrets.FEEDBACK_SECRET_KEY }}
           FEEDBACK_ALLOWED_HOSTS: ${{ secrets.FEEDBACK_ALLOWED_HOSTS }}
           FEEDBACK_CSRF_TRUSTED_ORIGINS: ${{ secrets.FEEDBACK_CSRF_TRUSTED_ORIGINS }}
@@ -99,7 +99,7 @@ jobs:
             FEEDBACK_BIND_PORT=${FEEDBACK_BIND_PORT:-18080}
             EOF
 
-            docker login ghcr.io -u "${GHCR_USERNAME}" -p "${GHCR_PAT}"
+            echo "${GHCR_PAT}" | docker login ghcr.io -u "${GHCR_USERNAME}" --password-stdin
             cd /opt/feedback
             docker compose --env-file .env -f docker-compose.prod.yml pull
             docker compose --env-file .env -f docker-compose.prod.yml up -d
