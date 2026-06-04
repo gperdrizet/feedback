@@ -8,7 +8,8 @@
     .panel { background: #fffdf7; padding: 1rem; border: 1px solid #dfd7c8; border-radius: 8px; margin-bottom: 1rem; }
     .layout { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(420px, 2fr); gap: 1rem; align-items: start; }
     .workspace { display: grid; grid-template-columns: minmax(420px, 1.25fr) minmax(380px, 1fr); gap: 1rem; align-items: start; }
-    .workspace-panel { min-height: 70vh; max-height: 70vh; overflow: auto; }
+    .workspace-panel { min-height: 72vh; max-height: 72vh; overflow: auto; }
+    .workspace-editor-column { position: sticky; top: 1rem; align-self: start; }
     .submissions-nav { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1rem; }
     .submissions-nav a { color: #8a3200; }
     textarea { width: 100%; min-height: 340px; }
@@ -18,7 +19,7 @@
     .listless { list-style: none; padding-left: 0; margin: 0; }
     .listless li { margin: 0.35rem 0; }
     .meta { font-size: 0.95rem; }
-    .notebook-preview { max-height: none; }
+    .notebook-preview { }
     .notebook-preview-note { margin-top: 0.25rem; }
     .notebook-cell { padding: 0.85rem; border: 1px solid #e4dac7; border-radius: 8px; margin-top: 0.75rem; background: #fff; }
     .notebook-cell-header { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; color: #8a3200; margin-bottom: 0.5rem; }
@@ -33,10 +34,21 @@
     .nb-output { background: #f7f7f7; border-top: 1px solid #e0d8c8; padding: 0.5rem; margin: 0.25rem 0 0; white-space: pre-wrap; word-break: break-word; font-size: 0.9rem; }
     .nb-output-error { color: #a00; }
     .nb-output-html { padding: 0.25rem 0; }
-    .review-actions { margin-top: 0.75rem; }
+    .editor-form { min-height: 100%; display: flex; flex-direction: column; }
+    .editor-fields { flex: 1 1 auto; overflow: auto; padding-right: 0.2rem; }
+    .review-actions {
+      margin-top: 0.75rem;
+      position: sticky;
+      bottom: 0;
+      background: #fffdf7;
+      border-top: 1px solid #dfd7c8;
+      padding-top: 0.75rem;
+      padding-bottom: 0.25rem;
+    }
     @media (max-width: 1100px) {
       .layout,
       .workspace { grid-template-columns: 1fr; }
+      .workspace-editor-column { position: static; top: auto; }
       .workspace-panel { min-height: auto; max-height: none; overflow: visible; }
       textarea { min-height: 240px; }
     }
@@ -59,7 +71,7 @@
   {% endif %}
 
   <div class="workspace">
-    <section>
+    <section class="workspace-notebook-column">
       {% if notebook_preview %}
       <div class="panel notebook-preview workspace-panel">
         <h2>Notebook Preview</h2>
@@ -82,17 +94,19 @@
       {% endif %}
     </section>
 
-    <section>
+    <section class="workspace-editor-column">
       <div class="panel workspace-panel">
         <h2>AI Draft</h2>
         {% if submission.ai_drafts.all %}
           <p class="muted">Latest draft below. You can edit it before posting.</p>
         {% endif %}
-        <form method="post">
+        <form method="post" class="editor-form">
           {% csrf_token %}
-          <p><label>Score <input type="text" name="final_score" value="{{ submission.final_score|default:submission.proposed_score|default:'' }}"></label></p>
-          <p><label>Feedback</label></p>
-          <textarea name="final_feedback">{{ submission.final_feedback|default:submission.proposed_feedback }}</textarea>
+          <div class="editor-fields">
+            <p><label>Score <input type="text" name="final_score" value="{{ submission.final_score|default:submission.proposed_score|default:'' }}"></label></p>
+            <p><label>Feedback</label></p>
+            <textarea name="final_feedback">{{ submission.final_feedback|default:submission.proposed_feedback }}</textarea>
+          </div>
           <p class="inline-actions review-actions">
             <button type="submit" name="action" value="save">Save Review</button>
             <button type="submit" name="action" value="post">Post to Canvas</button>
