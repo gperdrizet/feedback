@@ -6,17 +6,19 @@
   <style>
     body { font-family: Georgia, serif; margin: 2rem; background: #f6f4ef; color: #222; }
     .panel { background: #fffdf7; padding: 1rem; border: 1px solid #dfd7c8; border-radius: 8px; margin-bottom: 1rem; }
-    .layout { display: grid; grid-template-columns: minmax(280px, 1fr) minmax(360px, 1.25fr); gap: 1rem; align-items: start; }
+    .layout { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(420px, 2fr); gap: 1rem; align-items: start; }
+    .workspace { display: grid; grid-template-columns: minmax(420px, 1.25fr) minmax(380px, 1fr); gap: 1rem; align-items: start; }
+    .workspace-panel { min-height: 70vh; max-height: 70vh; overflow: auto; }
     .submissions-nav { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1rem; }
     .submissions-nav a { color: #8a3200; }
-    textarea { width: 100%; min-height: 220px; }
+    textarea { width: 100%; min-height: 340px; }
     input[type="text"] { width: 12rem; }
     .inline-actions { display: flex; gap: 0.75rem; flex-wrap: wrap; }
     .muted { color: #665; }
     .listless { list-style: none; padding-left: 0; margin: 0; }
     .listless li { margin: 0.35rem 0; }
     .meta { font-size: 0.95rem; }
-    .notebook-preview { max-height: 36rem; overflow: auto; }
+    .notebook-preview { max-height: none; }
     .notebook-preview-note { margin-top: 0.25rem; }
     .notebook-cell { padding: 0.85rem; border: 1px solid #e4dac7; border-radius: 8px; margin-top: 0.75rem; background: #fff; }
     .notebook-cell-header { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; color: #8a3200; margin-bottom: 0.5rem; }
@@ -31,6 +33,13 @@
     .nb-output { background: #f7f7f7; border-top: 1px solid #e0d8c8; padding: 0.5rem; margin: 0.25rem 0 0; white-space: pre-wrap; word-break: break-word; font-size: 0.9rem; }
     .nb-output-error { color: #a00; }
     .nb-output-html { padding: 0.25rem 0; }
+    .review-actions { margin-top: 0.75rem; }
+    @media (max-width: 1100px) {
+      .layout,
+      .workspace { grid-template-columns: 1fr; }
+      .workspace-panel { min-height: auto; max-height: none; overflow: visible; }
+      textarea { min-height: 240px; }
+    }
     {% if notebook_preview %}{{ notebook_preview.pygments_css }}{% endif %}
   </style>
 </head>
@@ -48,6 +57,52 @@
       <div>{{ message }}</div>
     {% endfor %}
   {% endif %}
+
+  <div class="workspace">
+    <section>
+      {% if notebook_preview %}
+      <div class="panel notebook-preview workspace-panel">
+        <h2>Notebook Preview</h2>
+        <p class="muted notebook-preview-note">Rendered from {{ notebook_preview.source }} · {{ notebook_preview.cell_count }} cells{% if notebook_preview.truncated %} · preview truncated{% endif %}</p>
+        {% for cell in notebook_preview.cells %}
+          <div class="notebook-cell notebook-cell-{{ cell.cell_type }}">
+            <div class="notebook-cell-header">{{ cell.title }} cell</div>
+            <div class="notebook-cell-body">{{ cell.rendered_html }}</div>
+            {% if cell.output_html %}
+              <div class="nb-output-html">{{ cell.output_html }}</div>
+            {% endif %}
+          </div>
+        {% endfor %}
+      </div>
+      {% else %}
+      <div class="panel workspace-panel">
+        <h2>Notebook Preview</h2>
+        <p class="muted">No notebook found for this submission.</p>
+      </div>
+      {% endif %}
+    </section>
+
+    <section>
+      <div class="panel workspace-panel">
+        <h2>AI Draft</h2>
+        {% if submission.ai_drafts.all %}
+          <p class="muted">Latest draft below. You can edit it before posting.</p>
+        {% endif %}
+        <form method="post">
+          {% csrf_token %}
+          <p><label>Score <input type="text" name="final_score" value="{{ submission.final_score|default:submission.proposed_score|default:'' }}"></label></p>
+          <p><label>Feedback</label></p>
+          <textarea name="final_feedback">{{ submission.final_feedback|default:submission.proposed_feedback }}</textarea>
+          <p class="inline-actions review-actions">
+            <button type="submit" name="action" value="save">Save Review</button>
+            <button type="submit" name="action" value="post">Post to Canvas</button>
+            <button type="submit" name="action" value="generate">Regenerate Draft</button>
+          </p>
+        </form>
+        {% if submission.last_error %}<p>Last error: {{ submission.last_error }}</p>{% endif %}
+      </div>
+    </section>
+  </div>
 
   <div class="layout">
     <section>
@@ -71,22 +126,6 @@
         </ul>
       </div>
 
-      {% if notebook_preview %}
-      <div class="panel notebook-preview">
-        <h2>Notebook Preview</h2>
-        <p class="muted notebook-preview-note">Rendered from {{ notebook_preview.source }} · {{ notebook_preview.cell_count }} cells{% if notebook_preview.truncated %} · preview truncated{% endif %}</p>
-        {% for cell in notebook_preview.cells %}
-          <div class="notebook-cell notebook-cell-{{ cell.cell_type }}">
-            <div class="notebook-cell-header">{{ cell.title }} cell</div>
-            <div class="notebook-cell-body">{{ cell.rendered_html }}</div>
-            {% if cell.output_html %}
-              <div class="nb-output-html">{{ cell.output_html }}</div>
-            {% endif %}
-          </div>
-        {% endfor %}
-      </div>
-      {% endif %}
-
       <div class="panel">
         <h2>Student Review Queue</h2>
         <ul class="listless">
@@ -106,32 +145,8 @@
 
     <section>
       <div class="panel">
-        <h2>AI Draft</h2>
-        {% if submission.ai_drafts.all %}
-          <p class="muted">Latest draft below. You can edit it before posting.</p>
-        {% endif %}
-        <form method="post">
-          {% csrf_token %}
-          <p><label>Score <input type="text" name="final_score" value="{{ submission.final_score|default:submission.proposed_score|default:'' }}"></label></p>
-          <p><label>Feedback</label></p>
-          <textarea name="final_feedback">{{ submission.final_feedback|default:submission.proposed_feedback }}</textarea>
-          <p class="inline-actions">
-            <button type="submit" name="action" value="save">Save Review</button>
-            <button type="submit" name="action" value="post">Post to Canvas</button>
-          </p>
-        </form>
-      </div>
-
-      <div class="panel">
-        <h2>Generate or Post</h2>
-        <div class="inline-actions">
-          <form method="post">
-            {% csrf_token %}
-            <input type="hidden" name="action" value="generate">
-            <button type="submit">Generate Draft</button>
-          </form>
-        </div>
-        {% if submission.last_error %}<p>Last error: {{ submission.last_error }}</p>{% endif %}
+        <h2>Review Controls</h2>
+        <p class="muted">Use the workspace above for editing and posting. Use this queue to jump between students quickly.</p>
       </div>
     </section>
   </div>
