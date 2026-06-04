@@ -1,10 +1,13 @@
+import json
+import tempfile
+from pathlib import Path
 from decimal import Decimal
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from django.test import TestCase
 from django.urls import reverse
 
-from grading.models import AssignmentConfig, CourseSync, SubmissionRecord
+from grading.models import AssignmentConfig, CourseSync, SubmissionArtifact, SubmissionRecord
 
 
 class ReviewWorkflowTests(TestCase):
@@ -40,6 +43,13 @@ class ReviewWorkflowTests(TestCase):
 			proposed_score=Decimal("76.00"),
 			proposed_feedback="Needs revision.",
 		)
+		self.tempdir = tempfile.TemporaryDirectory()
+		self.addCleanup(self.tempdir.cleanup)
+
+	def _write_notebook(self, filename, cells):
+		path = Path(self.tempdir.name) / filename
+		path.write_text(json.dumps({"cells": cells}), encoding="utf-8")
+		return path
 
 	@patch("grading.views.generate_ai_draft")
 	@patch("grading.views.sync_assignment_from_canvas")
@@ -98,3 +108,59 @@ class ReviewWorkflowTests(TestCase):
 		self.first_submission.refresh_from_db()
 		self.assertEqual(self.first_submission.final_score, Decimal("87"))
 		self.assertEqual(self.first_submission.final_feedback, "Ready to post.")
+
+	def test_submission_review_renders_local_notebook_artifact(self):
+		notebook_path = self._write_notebook(
+			"submission.ipynb",
+			[
+				{"cell_type": "markdown", "metadata": {}, "source": ["# Notebook Title\n", "Hello **world**\n"]},
+				{"cell_type": "code", "metadata": {"language": "python"}, "source": ["print('hi')\n"]},
+			],
+		)
+		notebook_submission = SubmissionRecord.objects.create(
+			assignment=self.assignment,
+			canvas_submission_id=4,
+			canvas_user_id=14,
+			student_name="Dana",
+			proposed_score=Decimal("95.00"),
+			proposed_feedback="Looks good.",
+		)
+		SubmissionArtifact.objects.create(
+			submission=notebook_submission,
+			artifact_type=SubmissionArtifact.ArtifactType.ATTACHMENT,
+			local_path=str(notebook_path),
+		)
+
+		response = self.client.get(reverse("grading:submission_detail", args=[notebook_submission.pk]))
+
+		self.assertContains(response, "Notebook Preview")
+		self.assertContains(response, "Notebook Title")
+		self.assertContains(response, "Hello")
+		self.assertContains(response, "print(&#x27;hi&#x27;)")
+
+	@patch("grading.views.requests.get")
+	def test_submission_review_renders_linked_notebook(self, mock_get):
+		mock_response = Mock()
+		mock_response.raise_for_status.return_value = None
+		mock_response.json.return_value = {
+			"cells": [
+				{"cell_type": "markdown", "metadata": {}, "source": ["Linked notebook\n"]},
+			]
+		}
+		mock_get.return_value = mock_response
+
+		linked_submission = SubmissionRecord.objects.create(
+			assignment=self.assignment,
+			canvas_submission_id=5,
+			canvas_user_id=15,
+			student_name="Eli",
+			proposed_score=Decimal("88.00"),
+			proposed_feedback="Fine.",
+			submission_url="https://example.com/student-notebook.ipynb",
+		)
+
+		response = self.client.get(reverse("grading:submission_detail", args=[linked_submission.pk]))
+
+		self.assertContains(response, "Notebook Preview")
+		self.assertContains(response, "Linked notebook")
+		mock_get.assert_called_once_with("https://example.com/student-notebook.ipynb", timeout=30)

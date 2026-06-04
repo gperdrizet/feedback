@@ -16,6 +16,18 @@
     .listless { list-style: none; padding-left: 0; margin: 0; }
     .listless li { margin: 0.35rem 0; }
     .meta { font-size: 0.95rem; }
+    .notebook-preview { max-height: 36rem; overflow: auto; }
+    .notebook-preview-note { margin-top: 0.25rem; }
+    .notebook-cell { padding: 0.85rem; border: 1px solid #e4dac7; border-radius: 8px; margin-top: 0.75rem; background: #fff; }
+    .notebook-cell-header { font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; color: #8a3200; margin-bottom: 0.5rem; }
+    .notebook-cell-body { line-height: 1.45; }
+    .notebook-cell-body pre { margin: 0; white-space: pre-wrap; word-break: break-word; }
+    .notebook-cell-body ul { margin: 0.5rem 0 0.5rem 1.2rem; }
+    .notebook-cell-body h2,
+    .notebook-cell-body h3,
+    .notebook-cell-body h4,
+    .notebook-cell-body h5,
+    .notebook-cell-body h6 { margin: 0.4rem 0 0.35rem; }
   </style>
 </head>
 <body>
@@ -54,6 +66,19 @@
           {% endfor %}
         </ul>
       </div>
+
+      {% if notebook_preview %}
+      <div class="panel notebook-preview">
+        <h2>Notebook Preview</h2>
+        <p class="muted notebook-preview-note">Rendered from {{ notebook_preview.source }} · {{ notebook_preview.cell_count }} cells{% if notebook_preview.truncated %} · preview truncated{% endif %}</p>
+        {% for cell in notebook_preview.cells %}
+          <div class="notebook-cell notebook-cell-{{ cell.cell_type }}">
+            <div class="notebook-cell-header">{{ cell.title }} cell</div>
+            <div class="notebook-cell-body">{{ cell.rendered_html }}</div>
+          </div>
+        {% endfor %}
+      </div>
+      {% endif %}
 
       <div class="panel">
         <h2>Student Review Queue</h2>

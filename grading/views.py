@@ -1,4 +1,12 @@
+import html
+import json
+import re
+from pathlib import Path
+from urllib.parse import urlparse
+
+import requests
 from django.contrib import messages
+from django.utils.safestring import mark_safe
 from django.shortcuts import get_object_or_404, redirect, render
 
 from grading.models import AssignmentConfig, SubmissionRecord
@@ -24,6 +32,158 @@ def _neighboring_submission_ids(submissions, current_submission_id):
 	previous_id = submission_ids[current_index - 1] if current_index > 0 else None
 	next_id = submission_ids[current_index + 1] if current_index < len(submission_ids) - 1 else None
 	return previous_id, next_id
+
+
+def _coerce_submission_sources(submission):
+	sources = []
+	for artifact in submission.artifacts.all():
+		if artifact.local_path:
+			sources.append(("local_path", artifact.local_path))
+		if artifact.source_url:
+			sources.append(("source_url", artifact.source_url))
+
+	if submission.submission_url:
+		sources.append(("submission_url", submission.submission_url))
+
+	return sources
+
+
+def _is_notebook_reference(value):
+	if not value:
+		return False
+
+	parsed = urlparse(value)
+	path = parsed.path if parsed.scheme else value
+	return path.lower().endswith(".ipynb")
+
+
+def _coerce_cell_source(source):
+	if isinstance(source, list):
+		return "".join(source)
+	if source is None:
+		return ""
+	return str(source)
+
+
+def _render_inline_markdown(text):
+	escaped = html.escape(text)
+	escaped = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", escaped)
+	escaped = re.sub(r"(?<!\*)\*(.+?)\*(?!\*)", r"<em>\1</em>", escaped)
+	escaped = re.sub(
+		r"\[(.+?)\]\((.+?)\)",
+		r'<a href="\2" target="_blank" rel="noreferrer">\1</a>',
+		escaped,
+	)
+	return escaped
+
+
+def _render_markdown_cell(text):
+	blocks = []
+	list_items = []
+	paragraph_lines = []
+
+	def flush_paragraph():
+		nonlocal paragraph_lines
+		if paragraph_lines:
+			blocks.append(f"<p>{' '.join(paragraph_lines)}</p>")
+			paragraph_lines = []
+
+	def flush_list():
+		nonlocal list_items
+		if list_items:
+			items = "".join(f"<li>{item}</li>" for item in list_items)
+			blocks.append(f"<ul>{items}</ul>")
+			list_items = []
+
+	for raw_line in text.splitlines():
+		line = raw_line.strip()
+		if not line:
+			flush_paragraph()
+			flush_list()
+			continue
+
+		heading_match = re.match(r"^(#{1,6})\s+(.*)$", line)
+		if heading_match:
+			flush_paragraph()
+			flush_list()
+			heading_level = min(len(heading_match.group(1)) + 1, 6)
+			blocks.append(
+				f"<h{heading_level}>{_render_inline_markdown(heading_match.group(2))}</h{heading_level}>"
+			)
+			continue
+
+		if line.startswith("- ") or line.startswith("* "):
+			flush_paragraph()
+			list_items.append(_render_inline_markdown(line[2:]))
+			continue
+
+		flush_list()
+		paragraph_lines.append(_render_inline_markdown(line))
+
+	flush_paragraph()
+	flush_list()
+
+	if not blocks:
+		blocks.append("<p><em>Empty markdown cell</em></p>")
+
+	return mark_safe("\n".join(blocks))
+
+
+def _render_code_cell(text):
+	return mark_safe(f"<pre>{html.escape(text)}</pre>")
+
+
+def _load_notebook_payload(source_kind, source_value):
+	if source_kind == "local_path":
+		path = Path(source_value)
+		if not path.exists() or path.is_dir():
+			return None
+		return json.loads(path.read_text(encoding="utf-8"))
+
+	response = requests.get(source_value, timeout=30)
+	response.raise_for_status()
+	return response.json()
+
+
+def _build_notebook_preview(submission, max_cells=60):
+	for source_kind, source_value in _coerce_submission_sources(submission):
+		if not _is_notebook_reference(source_value):
+			continue
+
+		try:
+			payload = _load_notebook_payload(source_kind, source_value)
+		except (OSError, ValueError, json.JSONDecodeError, requests.RequestException):
+			continue
+
+		if not isinstance(payload, dict):
+			continue
+
+		cells = []
+		raw_cells = payload.get("cells", []) or []
+		for cell in raw_cells[:max_cells]:
+			cell_type = cell.get("cell_type", "unknown")
+			source = _coerce_cell_source(cell.get("source"))
+			if cell_type == "markdown":
+				rendered_html = _render_markdown_cell(source)
+			else:
+				rendered_html = _render_code_cell(source)
+
+			cells.append(
+				{
+					"cell_type": cell_type,
+					"title": cell.get("metadata", {}).get("language") or cell_type.title(),
+					"rendered_html": rendered_html,
+				}
+			)
+
+		return {
+			"source": source_value,
+			"cell_count": len(raw_cells),
+			"truncated": len(raw_cells) > len(cells),
+			"cells": cells,
+		}
+
+	return None
 
 
 def gradebook(request):
@@ -170,6 +330,7 @@ def submission_detail(request, submission_pk):
 			"ordered_submissions": ordered_submissions,
 			"previous_submission_pk": previous_submission_pk,
 			"next_submission_pk": next_submission_pk,
+			"notebook_preview": _build_notebook_preview(submission),
 		},
 	)
 
