@@ -52,6 +52,16 @@ def _coerce_submission_sources(submission):
 	return sources
 
 
+def _artifact_display_name(artifact):
+	if artifact.local_path:
+		return Path(artifact.local_path).name
+	if artifact.source_url:
+		parsed = urlparse(artifact.source_url)
+		name = Path(parsed.path).name
+		return name or artifact.source_url
+	return "artifact"
+
+
 def _is_notebook_reference(value):
 	if not value:
 		return False
@@ -388,6 +398,13 @@ def submission_detail(request, submission_pk):
 			"previous_submission_pk": previous_submission_pk,
 			"next_submission_pk": next_submission_pk,
 			"submission_preview": _build_submission_preview(submission),
+			"artifact_summaries": [
+				{
+					"type": artifact.artifact_type,
+					"name": _artifact_display_name(artifact),
+				}
+				for artifact in submission.artifacts.all()
+			],
 		},
 	)
 

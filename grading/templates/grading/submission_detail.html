@@ -6,13 +6,16 @@
   <style>
     body { font-family: Georgia, serif; margin: 2rem; background: #f6f4ef; color: #222; }
     .panel { background: #fffdf7; padding: 1rem; border: 1px solid #dfd7c8; border-radius: 8px; margin-bottom: 1rem; }
-    .layout { display: grid; grid-template-columns: minmax(260px, 1fr) minmax(420px, 2fr); gap: 1rem; align-items: start; }
     .workspace { display: grid; grid-template-columns: minmax(420px, 1.25fr) minmax(380px, 1fr); gap: 1rem; align-items: start; }
     .workspace-panel { min-height: 72vh; max-height: 72vh; overflow: auto; }
     .workspace-editor-column { position: sticky; top: 1rem; align-self: start; }
     .submissions-nav { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1rem; }
     .submissions-nav a { color: #8a3200; }
-    textarea { width: 100%; min-height: 340px; }
+    .submission-header { display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
+    .submission-header h1 { margin: 0; }
+    .header-meta { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0; }
+    .meta-chip { display: inline-block; background: #fffdf7; border: 1px solid #dfd7c8; border-radius: 999px; padding: 0.2rem 0.55rem; font-size: 0.85rem; color: #5a4f41; }
+    textarea { width: 100%; min-height: 460px; }
     input[type="text"] { width: 12rem; }
     .inline-actions { display: flex; gap: 0.75rem; flex-wrap: wrap; }
     .muted { color: #665; }
@@ -36,6 +39,8 @@
     .nb-output-html { padding: 0.25rem 0; }
     .editor-form { min-height: 100%; display: flex; flex-direction: column; }
     .editor-fields { flex: 1 1 auto; overflow: auto; padding-right: 0.2rem; }
+    .score-control { display: inline-flex; align-items: center; gap: 0.35rem; white-space: nowrap; }
+    .score-control input[type="text"] { width: 6.5rem; }
     .review-actions {
       margin-top: 0.75rem;
       position: sticky;
@@ -46,7 +51,6 @@
       padding-bottom: 0.25rem;
     }
     @media (max-width: 1100px) {
-      .layout,
       .workspace { grid-template-columns: 1fr; }
       .workspace-editor-column { position: static; top: auto; }
       .workspace-panel { min-height: auto; max-height: none; overflow: visible; }
@@ -57,7 +61,19 @@
 </head>
 <body>
   <p><a href="{% url 'grading:assignment_detail' submission.assignment.pk %}">Back to assignment</a></p>
-  <h1>{{ submission.student_name }}</h1>
+  <div class="submission-header">
+    <h1>{{ submission.student_name }}</h1>
+    <p class="header-meta">
+      <span class="meta-chip">AI: {{ submission.ai_status }}</span>
+      <span class="meta-chip">Review: {{ submission.review_status }}</span>
+      <span class="meta-chip">Submission ID: {{ submission.canvas_submission_id }}</span>
+      {% for artifact in artifact_summaries %}
+        <span class="meta-chip">{{ artifact.type }}: {{ artifact.name }}</span>
+      {% empty %}
+        <span class="meta-chip">No artifacts</span>
+      {% endfor %}
+    </p>
+  </div>
 
   <div class="submissions-nav">
     {% if previous_submission_pk %}<a href="{% url 'grading:submission_detail' previous_submission_pk %}">← Previous</a>{% endif %}
@@ -75,7 +91,7 @@
       {% if submission_preview %}
       <div class="panel submission-preview workspace-panel">
         <h2>{{ submission_preview.title }}</h2>
-        <p class="muted submission-preview-note">Rendered from {{ submission_preview.source }} · {{ submission_preview.cell_count }} section{% if submission_preview.cell_count != 1 %}s{% endif %}{% if submission_preview.truncated %} · preview truncated{% endif %}</p>
+        <p class="muted submission-preview-note">{{ submission_preview.cell_count }} section{% if submission_preview.cell_count != 1 %}s{% endif %}{% if submission_preview.truncated %} · preview truncated{% endif %}</p>
         {% for cell in submission_preview.cells %}
           <div class="notebook-cell notebook-cell-{{ cell.cell_type }}">
             <div class="notebook-cell-header">{{ cell.title }} cell</div>
@@ -96,18 +112,18 @@
 
     <section class="workspace-editor-column">
       <div class="panel workspace-panel">
-        <h2>AI Draft</h2>
+        <h2>Feedback</h2>
         {% if submission.ai_drafts.all %}
           <p class="muted">Latest draft below. You can edit it before posting.</p>
         {% endif %}
         <form method="post" class="editor-form">
           {% csrf_token %}
           <div class="editor-fields">
-            <p><label>Score <input type="text" name="final_score" value="{{ submission.final_score|default:submission.proposed_score|default:'' }}"></label></p>
             <p><label>Feedback</label></p>
             <textarea name="final_feedback">{{ submission.final_feedback|default:submission.proposed_feedback }}</textarea>
           </div>
           <p class="inline-actions review-actions">
+            <label class="score-control">Score <input type="text" name="final_score" value="{{ submission.final_score|default:submission.proposed_score|default:'' }}"></label>
             <button type="submit" name="action" value="save">Save Review</button>
             <button type="submit" name="action" value="post">Post to Canvas</button>
             <button type="submit" name="action" value="generate">Regenerate Draft</button>
@@ -118,51 +134,20 @@
     </section>
   </div>
 
-  <div class="layout">
-    <section>
-      <div class="panel">
-        <h2>Status</h2>
-        <p class="meta">AI: {{ submission.ai_status }} | Review: {{ submission.review_status }}</p>
-        <p class="meta">Proposed score: {{ submission.proposed_score }} | Final score: {{ submission.final_score }}</p>
-        <p class="meta">Canvas submission id: {{ submission.canvas_submission_id }}</p>
-        <p class="meta">Submission type: {{ submission.submission_type }}</p>
-        {% if submission.submission_url %}<p class="meta">Submission URL: <a href="{{ submission.submission_url }}">{{ submission.submission_url }}</a></p>{% endif %}
-      </div>
-
-      <div class="panel">
-        <h2>Artifacts</h2>
-        <ul class="listless">
-          {% for artifact in submission.artifacts.all %}
-            <li>{{ artifact.artifact_type }}: {{ artifact.local_path }} {% if artifact.source_url %}(<a href="{{ artifact.source_url }}">source</a>){% endif %}</li>
-          {% empty %}
-            <li>No downloaded artifacts.</li>
-          {% endfor %}
-        </ul>
-      </div>
-
-      <div class="panel">
-        <h2>Student Review Queue</h2>
-        <ul class="listless">
-          {% for item in ordered_submissions %}
-            <li>
-              {% if item.pk == submission.pk %}
-                <strong>{{ item.student_name }}</strong>
-              {% else %}
-                <a href="{% url 'grading:submission_detail' item.pk %}">{{ item.student_name }}</a>
-              {% endif %}
-              <span class="muted">({{ item.ai_status }}, {{ item.review_status }})</span>
-            </li>
-          {% endfor %}
-        </ul>
-      </div>
-    </section>
-
-    <section>
-      <div class="panel">
-        <h2>Review Controls</h2>
-        <p class="muted">Use the workspace above for editing and posting. Use this queue to jump between students quickly.</p>
-      </div>
-    </section>
+  <div class="panel">
+    <h2>Student Review Queue</h2>
+    <ul class="listless">
+      {% for item in ordered_submissions %}
+        <li>
+          {% if item.pk == submission.pk %}
+            <strong>{{ item.student_name }}</strong>
+          {% else %}
+            <a href="{% url 'grading:submission_detail' item.pk %}">{{ item.student_name }}</a>
+          {% endif %}
+          <span class="muted">({{ item.ai_status }}, {{ item.review_status }})</span>
+        </li>
+      {% endfor %}
+    </ul>
   </div>
 </body>
 </html>
