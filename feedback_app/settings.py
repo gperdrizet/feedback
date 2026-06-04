@@ -29,6 +29,9 @@ SECRET_KEY = os.getenv("FEEDBACK_SECRET_KEY", "django-insecure-feedback-local-de
 DEBUG = os.getenv("FEEDBACK_DEBUG", "true").lower() == "true"
 
 ALLOWED_HOSTS = [h.strip() for h in os.getenv("FEEDBACK_ALLOWED_HOSTS", "localhost,127.0.0.1").split(",") if h.strip()]
+for loopback_host in ("localhost", "127.0.0.1", "[::1]"):
+    if loopback_host not in ALLOWED_HOSTS:
+        ALLOWED_HOSTS.append(loopback_host)
 CSRF_TRUSTED_ORIGINS = [
     origin.strip()
     for origin in os.getenv("FEEDBACK_CSRF_TRUSTED_ORIGINS", "http://localhost,http://127.0.0.1").split(",")
