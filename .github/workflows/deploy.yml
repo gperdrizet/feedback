@@ -44,25 +44,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Prepare target directory on VPS
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ secrets.VPS_HOST }}
-          port: ${{ secrets.VPS_PORT }}
-          username: ${{ secrets.VPS_USER }}
-          key: ${{ secrets.VPS_SSH_KEY }}
-          script: |
-            sudo mkdir -p /opt/feedback/deploy
-            sudo chown -R "$USER:$USER" /opt/feedback
-
-      - name: Copy compose file to VPS
+      - name: Copy compose and deploy files to VPS
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.VPS_HOST }}
           port: ${{ secrets.VPS_PORT }}
           username: ${{ secrets.VPS_USER }}
           key: ${{ secrets.VPS_SSH_KEY }}
-          source: "docker-compose.prod.yml,deploy/bootstrap-vps.sh"
+          source: "docker-compose.prod.yml,deploy/"
           target: "/opt/feedback"
 
       - name: Deploy on VPS
@@ -92,10 +81,6 @@ jobs:
           envs: FEEDBACK_IMAGE,GHCR_USERNAME,GHCR_PAT,FEEDBACK_SECRET_KEY,FEEDBACK_ALLOWED_HOSTS,FEEDBACK_CSRF_TRUSTED_ORIGINS,FEEDBACK_AI_API_KEY,FEEDBACK_AI_BASE_URL,FEEDBACK_AI_MODEL,FEEDBACK_AI_TEMPERATURE,CANVAS_API_URL,CANVAS_API_KEY,POSTGRES_USER,POSTGRES_PASSWORD,POSTGRES_DB,FEEDBACK_BIND_PORT
           script: |
             set -eu
-            mkdir -p /opt/feedback
-
-            chmod +x /opt/feedback/deploy/bootstrap-vps.sh
-            /opt/feedback/deploy/bootstrap-vps.sh
 
             cat > /opt/feedback/.env <<EOF
             FEEDBACK_IMAGE=${FEEDBACK_IMAGE}
