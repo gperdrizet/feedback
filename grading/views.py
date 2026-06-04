@@ -1,13 +1,17 @@
-import html
+import base64
 import json
-import re
 from pathlib import Path
 from urllib.parse import urlparse
 
+import markdown as markdown_lib
 import requests
 from django.contrib import messages
 from django.utils.safestring import mark_safe
 from django.shortcuts import get_object_or_404, redirect, render
+from pygments import highlight
+from pygments.formatters import HtmlFormatter
+from pygments.lexers import get_lexer_by_name, guess_lexer, TextLexer
+from pygments.util import ClassNotFound
 
 from grading.models import AssignmentConfig, SubmissionRecord
 from grading.services.canvas_sync import (
@@ -57,6 +61,9 @@ def _is_notebook_reference(value):
 	return path.lower().endswith(".ipynb")
 
 
+_PYGMENTS_CSS = HtmlFormatter(style="default").get_style_defs(".highlight")
+
+
 def _coerce_cell_source(source):
 	if isinstance(source, list):
 		return "".join(source)
@@ -65,72 +72,49 @@ def _coerce_cell_source(source):
 	return str(source)
 
 
-def _render_inline_markdown(text):
-	escaped = html.escape(text)
-	escaped = re.sub(r"\*\*(.+?)\*\*", r"<strong>\1</strong>", escaped)
-	escaped = re.sub(r"(?<!\*)\*(.+?)\*(?!\*)", r"<em>\1</em>", escaped)
-	escaped = re.sub(
-		r"\[(.+?)\]\((.+?)\)",
-		r'<a href="\2" target="_blank" rel="noreferrer">\1</a>',
-		escaped,
-	)
-	return escaped
-
-
 def _render_markdown_cell(text):
-	blocks = []
-	list_items = []
-	paragraph_lines = []
-
-	def flush_paragraph():
-		nonlocal paragraph_lines
-		if paragraph_lines:
-			blocks.append(f"<p>{' '.join(paragraph_lines)}</p>")
-			paragraph_lines = []
-
-	def flush_list():
-		nonlocal list_items
-		if list_items:
-			items = "".join(f"<li>{item}</li>" for item in list_items)
-			blocks.append(f"<ul>{items}</ul>")
-			list_items = []
-
-	for raw_line in text.splitlines():
-		line = raw_line.strip()
-		if not line:
-			flush_paragraph()
-			flush_list()
-			continue
-
-		heading_match = re.match(r"^(#{1,6})\s+(.*)$", line)
-		if heading_match:
-			flush_paragraph()
-			flush_list()
-			heading_level = min(len(heading_match.group(1)) + 1, 6)
-			blocks.append(
-				f"<h{heading_level}>{_render_inline_markdown(heading_match.group(2))}</h{heading_level}>"
-			)
-			continue
-
-		if line.startswith("- ") or line.startswith("* "):
-			flush_paragraph()
-			list_items.append(_render_inline_markdown(line[2:]))
-			continue
-
-		flush_list()
-		paragraph_lines.append(_render_inline_markdown(line))
-
-	flush_paragraph()
-	flush_list()
-
-	if not blocks:
-		blocks.append("<p><em>Empty markdown cell</em></p>")
-
-	return mark_safe("\n".join(blocks))
+	if not text.strip():
+		return mark_safe("<p><em>Empty markdown cell</em></p>")
+	return mark_safe(markdown_lib.markdown(text, extensions=["fenced_code", "tables", "nl2br"]))
 
 
-def _render_code_cell(text):
-	return mark_safe(f"<pre>{html.escape(text)}</pre>")
+def _render_code_cell(text, language=None):
+	try:
+		lexer = get_lexer_by_name(language) if language else guess_lexer(text)
+	except ClassNotFound:
+		lexer = TextLexer()
+	return mark_safe(highlight(text, lexer, HtmlFormatter(style="default")))
+
+
+def _render_cell_outputs(outputs):
+	parts = []
+	for output in outputs or []:
+		output_type = output.get("output_type", "")
+		if output_type in ("stream", "execute_result", "display_data"):
+			data = output.get("data") or {}
+			# PNG image (base64 encoded)
+			png = data.get("image/png") or output.get("image/png")
+			if png:
+				raw = png if isinstance(png, str) else "".join(png)
+				parts.append(f'<img src="data:image/png;base64,{raw.strip()}" style="max-width:100%;">')
+				continue
+			# HTML output
+			html_out = data.get("text/html")
+			if html_out:
+				text = html_out if isinstance(html_out, str) else "".join(html_out)
+				parts.append(f'<div class="nb-output-html">{text}</div>')
+				continue
+			# Plain text / stdout
+			text_out = data.get("text/plain") or output.get("text")
+			if text_out:
+				text = text_out if isinstance(text_out, str) else "".join(text_out)
+				parts.append(f'<pre class="nb-output">{text}</pre>')
+				continue
+		elif output_type == "error":
+			traceback_lines = output.get("traceback", [output.get("evalue", "")])
+			raw = "\n".join(traceback_lines) if isinstance(traceback_lines, list) else traceback_lines
+			parts.append(f'<pre class="nb-output nb-output-error">{raw}</pre>')
+	return mark_safe("\n".join(parts)) if parts else None
 
 
 def _load_notebook_payload(source_kind, source_value):
@@ -158,21 +142,33 @@ def _build_notebook_preview(submission, max_cells=60):
 		if not isinstance(payload, dict):
 			continue
 
+		kernel_language = (
+			payload.get("metadata", {}).get("kernelspec", {}).get("language")
+			or payload.get("metadata", {}).get("language_info", {}).get("name")
+		)
+
 		cells = []
 		raw_cells = payload.get("cells", []) or []
 		for cell in raw_cells[:max_cells]:
 			cell_type = cell.get("cell_type", "unknown")
 			source = _coerce_cell_source(cell.get("source"))
+			cell_language = (
+				cell.get("metadata", {}).get("language")
+				or kernel_language
+			)
 			if cell_type == "markdown":
 				rendered_html = _render_markdown_cell(source)
+				output_html = None
 			else:
-				rendered_html = _render_code_cell(source)
+				rendered_html = _render_code_cell(source, language=cell_language)
+				output_html = _render_cell_outputs(cell.get("outputs"))
 
 			cells.append(
 				{
 					"cell_type": cell_type,
-					"title": cell.get("metadata", {}).get("language") or cell_type.title(),
+					"title": cell_language or cell_type.title(),
 					"rendered_html": rendered_html,
+					"output_html": output_html,
 				}
 			)
 
@@ -181,6 +177,7 @@ def _build_notebook_preview(submission, max_cells=60):
 			"cell_count": len(raw_cells),
 			"truncated": len(raw_cells) > len(cells),
 			"cells": cells,
+			"pygments_css": _PYGMENTS_CSS,
 		}
 
 	return None

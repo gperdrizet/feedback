@@ -136,7 +136,8 @@ class ReviewWorkflowTests(TestCase):
 		self.assertContains(response, "Notebook Preview")
 		self.assertContains(response, "Notebook Title")
 		self.assertContains(response, "Hello")
-		self.assertContains(response, "print(&#x27;hi&#x27;)")
+		self.assertContains(response, "print")
+		self.assertContains(response, "highlight")
 
 	@patch("grading.views.requests.get")
 	def test_submission_review_renders_linked_notebook(self, mock_get):
