@@ -12,6 +12,8 @@
     .workspace-editor-column { position: sticky; top: 1rem; align-self: start; }
     .submissions-nav { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-bottom: 1rem; }
     .submissions-nav a { color: #8a3200; }
+    .roster-jump { display: inline-flex; align-items: center; gap: 0.45rem; }
+    .roster-jump select { min-width: 16rem; max-width: 24rem; }
     .submission-header { display: flex; align-items: baseline; gap: 1rem; flex-wrap: wrap; margin-bottom: 0.75rem; }
     .submission-header h1 { margin: 0; }
     .header-meta { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0; }
@@ -77,6 +79,14 @@
   </div>
 
   <div class="submissions-nav">
+    <label class="roster-jump" for="submission-jump">
+      <span>Student</span>
+      <select id="submission-jump" onchange="if (this.value) window.location.href=this.value;">
+        {% for item in ordered_submissions %}
+          <option value="{% url 'grading:submission_detail' item.pk %}" {% if item.pk == submission.pk %}selected{% endif %}>{{ item.student_name }}</option>
+        {% endfor %}
+      </select>
+    </label>
     {% if previous_submission_pk %}<a href="{% url 'grading:submission_detail' previous_submission_pk %}">← Previous</a>{% endif %}
     {% if next_submission_pk %}<a href="{% url 'grading:submission_detail' next_submission_pk %}">Next →</a>{% endif %}
   </div>
@@ -137,20 +147,5 @@
     </section>
   </div>
 
-  <div class="panel">
-    <h2>Student Review Queue</h2>
-    <ul class="listless">
-      {% for item in ordered_submissions %}
-        <li>
-          {% if item.pk == submission.pk %}
-            <strong>{{ item.student_name }}</strong>
-          {% else %}
-            <a href="{% url 'grading:submission_detail' item.pk %}">{{ item.student_name }}</a>
-          {% endif %}
-          <span class="muted">({{ item.ai_status }}, {{ item.review_status }})</span>
-        </li>
-      {% endfor %}
-    </ul>
-  </div>
 </body>
 </html>
