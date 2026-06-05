@@ -77,10 +77,8 @@ def post_submission_grade(course_id, assignment_id, user_id, posted_grade, comme
 
     payload = {"submission": {"posted_grade": posted_grade}}
     if comment:
-        if comment_format == "html":
-            payload["comment"] = {"html_comment": comment}
-        else:
-            payload["comment"] = {"text_comment": comment}
+        # Canvas consistently accepts text_comment; HTML content is sanitized/rendered server-side.
+        payload["comment"] = {"text_comment": comment}
 
     updated = submission.edit(**payload)
     return {
