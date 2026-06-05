@@ -15,15 +15,24 @@ Including another URLconf
     2. Add a URL to urlpatterns:  path('blog/', include('blog.urls'))
 """
 from django.contrib import admin
-from django.http import JsonResponse
+from django.http import HttpResponse, JsonResponse
 from django.urls import include, path
 
 
 def healthz(_request):
     return JsonResponse({"status": "ok"})
 
+
+def favicon(_request):
+    svg = """<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'>
+<rect width='64' height='64' rx='12' fill='#8a3200'/>
+<path d='M16 18h32v8H26v10h18v8H26v14h-10V18z' fill='#fff'/>
+</svg>"""
+    return HttpResponse(svg, content_type="image/svg+xml")
+
 urlpatterns = [
     path('healthz/', healthz),
+    path('favicon.ico', favicon),
     path('admin/', admin.site.urls),
     path('', include('grading.urls')),
 ]
