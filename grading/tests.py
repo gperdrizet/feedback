@@ -7,7 +7,7 @@ from unittest.mock import Mock, patch
 from django.test import TestCase
 from django.urls import reverse
 
-from grading.models import AssignmentConfig, CourseSync, SubmissionArtifact, SubmissionRecord
+from grading.models import AssignmentConfig, BatchReviewJob, CourseSync, SubmissionArtifact, SubmissionRecord
 
 
 class ReviewWorkflowTests(TestCase):
@@ -51,22 +51,38 @@ class ReviewWorkflowTests(TestCase):
 		path.write_text(json.dumps({"cells": cells}), encoding="utf-8")
 		return path
 
-	@patch("grading.views.generate_ai_draft")
-	@patch("grading.views.sync_assignment_from_canvas")
-	def test_assignment_batch_review_triggers_sync_and_drafts(self, mock_sync, mock_generate):
+	@patch("grading.views.threading.Thread.start")
+	def test_assignment_batch_review_starts_async_job(self, mock_thread_start):
 		response = self.client.post(
 			reverse("grading:assignment_detail", args=[self.assignment.pk]),
 			{"action": "batch_review"},
 		)
 
 		self.assertEqual(response.status_code, 302)
-		mock_sync.assert_called_once_with(
-			course_id=self.course.canvas_course_id,
-			assignment_id=self.assignment.canvas_assignment_id,
-			download_root="submissions",
+		self.assertEqual(response.headers["Location"], reverse("grading:assignment_detail", args=[self.assignment.pk]))
+		self.assertEqual(BatchReviewJob.objects.filter(assignment=self.assignment).count(), 1)
+		job = BatchReviewJob.objects.get(assignment=self.assignment)
+		self.assertEqual(job.status, BatchReviewJob.Status.QUEUED)
+		mock_thread_start.assert_called_once()
+
+	def test_assignment_batch_status_endpoint_returns_job_and_rows(self):
+		job = BatchReviewJob.objects.create(
+			assignment=self.assignment,
+			status=BatchReviewJob.Status.RUNNING,
+			total_submissions=3,
+			completed_submissions=1,
+			failed_submissions=0,
+			current_student_name="Bob",
 		)
-		self.assertEqual(mock_generate.call_count, 3)
-		self.assertEqual(response.headers["Location"], reverse("grading:submission_detail", args=[self.first_submission.pk]))
+
+		response = self.client.get(reverse("grading:assignment_batch_status", args=[self.assignment.pk]))
+
+		self.assertEqual(response.status_code, 200)
+		payload = response.json()
+		self.assertEqual(payload["job"]["id"], job.pk)
+		self.assertEqual(payload["job"]["status"], BatchReviewJob.Status.RUNNING)
+		self.assertEqual(payload["job"]["current_student_name"], "Bob")
+		self.assertEqual(len(payload["submissions"]), 3)
 
 	def test_submission_review_shows_navigation_links(self):
 		response = self.client.get(reverse("grading:submission_detail", args=[self.second_submission.pk]))

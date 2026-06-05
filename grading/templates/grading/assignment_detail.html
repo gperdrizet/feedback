@@ -12,6 +12,10 @@
     .actions { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; }
     .button { display: inline-block; padding: 0.5rem 0.85rem; border: 1px solid #8a3200; border-radius: 6px; background: #fff6ee; text-decoration: none; color: #8a3200; }
     .button.primary { background: #8a3200; color: #fff; }
+    .stats { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 0.75rem; }
+    .stat-chip { border: 1px solid #d8d0c0; border-radius: 999px; padding: 0.25rem 0.65rem; font-size: 0.9rem; background: #fff; }
+    .job-status { margin-top: 0.75rem; font-size: 0.95rem; }
+    .job-status.error { color: #a22424; }
   </style>
 </head>
 <body>
@@ -35,6 +39,23 @@
       <input type="hidden" name="action" value="batch_review">
       <button type="submit" class="button primary">Batch Download &amp; Generate Drafts</button>
     </form>
+    <div id="batch-progress" data-status-url="{% url 'grading:assignment_batch_status' assignment.pk %}">
+      <div id="batch-job-status" class="job-status">
+        {% if latest_batch_job %}
+          Latest job: {{ latest_batch_job.status }}
+        {% else %}
+          No batch job has run yet.
+        {% endif %}
+      </div>
+      <div class="stats">
+        <span class="stat-chip">Total: <strong id="stat-total">{{ latest_batch_job.total_submissions|default:0 }}</strong></span>
+        <span class="stat-chip">Completed: <strong id="stat-completed">{{ latest_batch_job.completed_submissions|default:0 }}</strong></span>
+        <span class="stat-chip">Failed: <strong id="stat-failed">{{ latest_batch_job.failed_submissions|default:0 }}</strong></span>
+      </div>
+      <div id="batch-current-student" class="job-status"></div>
+      <div id="batch-summary" class="job-status"></div>
+      <div id="batch-last-error" class="job-status error"></div>
+    </div>
   </div>
 
   <table>
@@ -50,12 +71,12 @@
     </thead>
     <tbody>
       {% for submission in submissions %}
-      <tr>
+      <tr data-submission-id="{{ submission.pk }}">
         <td>{{ submission.student_name }}</td>
-        <td>{{ submission.ai_status }}</td>
-        <td>{{ submission.review_status }}</td>
-        <td>{{ submission.proposed_score }}</td>
-        <td>{{ submission.final_score }}</td>
+        <td data-col="ai_status">{{ submission.ai_status }}</td>
+        <td data-col="review_status">{{ submission.review_status }}</td>
+        <td data-col="proposed_score">{{ submission.proposed_score }}</td>
+        <td data-col="final_score">{{ submission.final_score }}</td>
         <td><a href="{% url 'grading:submission_detail' submission.pk %}">Review</a></td>
       </tr>
       {% empty %}
@@ -63,5 +84,86 @@
       {% endfor %}
     </tbody>
   </table>
+
+  <script>
+    (function () {
+      const root = document.getElementById("batch-progress");
+      if (!root) {
+        return;
+      }
+
+      const statusUrl = root.getAttribute("data-status-url");
+      const statusEl = document.getElementById("batch-job-status");
+      const currentEl = document.getElementById("batch-current-student");
+      const summaryEl = document.getElementById("batch-summary");
+      const errorEl = document.getElementById("batch-last-error");
+      const totalEl = document.getElementById("stat-total");
+      const completedEl = document.getElementById("stat-completed");
+      const failedEl = document.getElementById("stat-failed");
+
+      function updateSubmissionTable(submissions) {
+        if (!Array.isArray(submissions)) {
+          return;
+        }
+
+        submissions.forEach((row) => {
+          const tr = document.querySelector(`tr[data-submission-id="${row.id}"]`);
+          if (!tr) {
+            return;
+          }
+          const aiCell = tr.querySelector('[data-col="ai_status"]');
+          const reviewCell = tr.querySelector('[data-col="review_status"]');
+          const proposedCell = tr.querySelector('[data-col="proposed_score"]');
+          const finalCell = tr.querySelector('[data-col="final_score"]');
+
+          if (aiCell) aiCell.textContent = row.ai_status || "";
+          if (reviewCell) reviewCell.textContent = row.review_status || "";
+          if (proposedCell) proposedCell.textContent = row.proposed_score || "";
+          if (finalCell) finalCell.textContent = row.final_score || "";
+        });
+      }
+
+      function renderJob(job) {
+        if (!job) {
+          statusEl.textContent = "No batch job has run yet.";
+          currentEl.textContent = "";
+          summaryEl.textContent = "";
+          errorEl.textContent = "";
+          totalEl.textContent = "0";
+          completedEl.textContent = "0";
+          failedEl.textContent = "0";
+          return false;
+        }
+
+        statusEl.textContent = `Latest job: ${job.status}`;
+        totalEl.textContent = String(job.total_submissions || 0);
+        completedEl.textContent = String(job.completed_submissions || 0);
+        failedEl.textContent = String(job.failed_submissions || 0);
+
+        currentEl.textContent = job.current_student_name ? `Current student: ${job.current_student_name}` : "";
+        summaryEl.textContent = job.summary_message || "";
+        errorEl.textContent = job.last_error || "";
+
+        return job.status === "queued" || job.status === "running";
+      }
+
+      function pollStatus() {
+        fetch(statusUrl, { headers: { "Accept": "application/json" } })
+          .then((response) => response.json())
+          .then((payload) => {
+            const keepPolling = renderJob(payload.job);
+            updateSubmissionTable(payload.submissions);
+            if (keepPolling) {
+              window.setTimeout(pollStatus, 1500);
+            }
+          })
+          .catch(() => {
+            window.setTimeout(pollStatus, 3000);
+          });
+      }
+
+      pollStatus();
+    })();
+  </script>
 </body>
 </html>

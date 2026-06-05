@@ -1,11 +1,15 @@
 import base64
 import json
+import threading
 from pathlib import Path
 from urllib.parse import urlparse
 
 import markdown as markdown_lib
 import requests
 from django.contrib import messages
+from django.db import close_old_connections
+from django.http import JsonResponse
+from django.utils import timezone
 from django.utils.safestring import mark_safe
 from django.shortcuts import get_object_or_404, redirect, render
 from pygments import highlight
@@ -13,7 +17,7 @@ from pygments.formatters import HtmlFormatter
 from pygments.lexers import get_lexer_by_name, guess_lexer, TextLexer
 from pygments.util import ClassNotFound
 
-from grading.models import AssignmentConfig, SubmissionRecord
+from grading.models import AssignmentConfig, BatchReviewJob, SubmissionRecord
 from grading.services.canvas_sync import (
 	approve_submission,
 	generate_ai_draft,
@@ -24,6 +28,116 @@ from grading.services.canvas_sync import (
 
 def _ordered_assignment_submissions(assignment):
 	return assignment.submissions.all().order_by("student_name", "canvas_submission_id")
+
+
+def _serialize_submission_row(submission):
+	return {
+		"id": submission.pk,
+		"ai_status": submission.ai_status,
+		"review_status": submission.review_status,
+		"proposed_score": str(submission.proposed_score) if submission.proposed_score is not None else "",
+		"final_score": str(submission.final_score) if submission.final_score is not None else "",
+	}
+
+
+def _serialize_batch_job(job):
+	if not job:
+		return None
+
+	return {
+		"id": job.pk,
+		"status": job.status,
+		"total_submissions": job.total_submissions,
+		"completed_submissions": job.completed_submissions,
+		"failed_submissions": job.failed_submissions,
+		"current_student_name": job.current_student_name,
+		"summary_message": job.summary_message,
+		"last_error": job.last_error,
+		"started_at": job.started_at.isoformat() if job.started_at else None,
+		"finished_at": job.finished_at.isoformat() if job.finished_at else None,
+	}
+
+
+def _run_batch_review_job(job_pk):
+	close_old_connections()
+	try:
+		job = BatchReviewJob.objects.select_related("assignment", "assignment__course").get(pk=job_pk)
+		job.status = BatchReviewJob.Status.RUNNING
+		job.started_at = timezone.now()
+		job.finished_at = None
+		job.summary_message = ""
+		job.last_error = ""
+		job.current_student_name = ""
+		job.total_submissions = 0
+		job.completed_submissions = 0
+		job.failed_submissions = 0
+		job.save(
+			update_fields=[
+				"status",
+				"started_at",
+				"finished_at",
+				"summary_message",
+				"last_error",
+				"current_student_name",
+				"total_submissions",
+				"completed_submissions",
+				"failed_submissions",
+			],
+		)
+
+		sync_assignment_from_canvas(
+			course_id=job.assignment.course.canvas_course_id,
+			assignment_id=job.assignment.canvas_assignment_id,
+			download_root="submissions",
+		)
+
+		assignment = AssignmentConfig.objects.select_related("course").get(pk=job.assignment.pk)
+		submissions = list(_ordered_assignment_submissions(assignment))
+		job.total_submissions = len(submissions)
+		job.save(update_fields=["total_submissions"])
+
+		for submission in submissions:
+			job.current_student_name = submission.student_name
+			job.save(update_fields=["current_student_name"])
+			try:
+				generate_ai_draft(submission)
+				job.completed_submissions += 1
+			except Exception as exc:  # noqa: BLE001
+				job.failed_submissions += 1
+				job.last_error = f"{submission.student_name}: {exc}"
+			finally:
+				job.save(update_fields=["completed_submissions", "failed_submissions", "last_error"])
+
+		job.status = BatchReviewJob.Status.COMPLETED
+		job.finished_at = timezone.now()
+		job.current_student_name = ""
+		job.summary_message = (
+			f"Generated drafts for {job.completed_submissions} of {job.total_submissions} submissions."
+			+ (f" {job.failed_submissions} failed." if job.failed_submissions else "")
+		)
+		job.save(update_fields=["status", "finished_at", "current_student_name", "summary_message"])
+	except Exception as exc:  # noqa: BLE001
+		BatchReviewJob.objects.filter(pk=job_pk).update(
+			status=BatchReviewJob.Status.FAILED,
+			finished_at=timezone.now(),
+			current_student_name="",
+			last_error=str(exc),
+			summary_message="Batch review failed.",
+		)
+	finally:
+		close_old_connections()
+
+
+def _start_batch_review_job(assignment):
+	running_job = assignment.batch_jobs.filter(
+		status__in=[BatchReviewJob.Status.QUEUED, BatchReviewJob.Status.RUNNING]
+	).order_by("-created_at").first()
+	if running_job:
+		return running_job, False
+
+	job = BatchReviewJob.objects.create(assignment=assignment, status=BatchReviewJob.Status.QUEUED)
+	threading.Thread(target=_run_batch_review_job, args=(job.pk,), daemon=True).start()
+	return job, True
 
 
 def _neighboring_submission_ids(submissions, current_submission_id):
@@ -291,45 +405,37 @@ def assignment_detail(request, assignment_pk):
 	if request.method == "POST":
 		action = request.POST.get("action")
 		if action == "batch_review":
-			try:
-				sync_assignment_from_canvas(
-					course_id=assignment.course.canvas_course_id,
-					assignment_id=assignment.canvas_assignment_id,
-					download_root="submissions",
-				)
-
-				refreshed_assignment = get_object_or_404(
-					AssignmentConfig.objects.select_related("course").prefetch_related("submissions"),
-					pk=assignment_pk,
-				)
-				submissions = list(_ordered_assignment_submissions(refreshed_assignment))
-				generated_count = 0
-				failed_count = 0
-				for submission in submissions:
-					try:
-						generate_ai_draft(submission)
-						generated_count += 1
-					except Exception as exc:  # noqa: BLE001
-						failed_count += 1
-						messages.error(request, f"{submission.student_name}: {exc}")
-
-				messages.success(
-					request,
-					f"Downloaded submissions and generated AI drafts for {generated_count} students."
-					+ (f" {failed_count} failed." if failed_count else ""),
-				)
-				if submissions:
-					return redirect("grading:submission_detail", submission_pk=submissions[0].pk)
-			except Exception as exc:  # noqa: BLE001
-				messages.error(request, f"Batch review failed: {exc}")
+			job, created = _start_batch_review_job(assignment)
+			if created:
+				messages.success(request, "Batch review started.")
+			else:
+				messages.info(request, "A batch review job is already running for this assignment.")
 
 		return redirect("grading:assignment_detail", assignment_pk=assignment.pk)
 
 	submissions = _ordered_assignment_submissions(assignment)
+	latest_job = assignment.batch_jobs.order_by("-created_at").first()
 	return render(
 		request,
 		"grading/assignment_detail.html",
-		{"assignment": assignment, "submissions": submissions},
+		{
+			"assignment": assignment,
+			"submissions": submissions,
+			"latest_batch_job": latest_job,
+		},
+	)
+
+
+def assignment_batch_status(request, assignment_pk):
+	assignment = get_object_or_404(AssignmentConfig, pk=assignment_pk)
+	latest_job = assignment.batch_jobs.order_by("-created_at").first()
+	submissions = _ordered_assignment_submissions(assignment)
+
+	return JsonResponse(
+		{
+			"job": _serialize_batch_job(latest_job),
+			"submissions": [_serialize_submission_row(submission) for submission in submissions],
+		}
 	)
 
 

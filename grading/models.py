@@ -117,3 +117,24 @@ class CanvasPostAttempt(models.Model):
     success = models.BooleanField(default=False)
     response_payload = models.JSONField(default=dict, blank=True)
     error_message = models.TextField(blank=True)
+
+
+class BatchReviewJob(models.Model):
+    class Status(models.TextChoices):
+        QUEUED = "queued", "Queued"
+        RUNNING = "running", "Running"
+        COMPLETED = "completed", "Completed"
+        FAILED = "failed", "Failed"
+
+    assignment = models.ForeignKey(AssignmentConfig, on_delete=models.CASCADE, related_name="batch_jobs")
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.QUEUED)
+    total_submissions = models.PositiveIntegerField(default=0)
+    completed_submissions = models.PositiveIntegerField(default=0)
+    failed_submissions = models.PositiveIntegerField(default=0)
+    current_student_name = models.CharField(max_length=255, blank=True)
+    summary_message = models.TextField(blank=True)
+    last_error = models.TextField(blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)
