@@ -69,18 +69,74 @@ def _get_canvas_client():
         return Canvas(api_url, api_key)
 
 
+def _submission_comment_count(submission):
+    comments = getattr(submission, "submission_comments", None)
+    if isinstance(comments, list):
+        return len(comments)
+    return 0
+
+
+def _post_grade_comment_via_rest(course_id, assignment_id, user_id, posted_grade, comment=None):
+    load_dotenv()
+    api_url = (os.getenv("CANVAS_API_URL") or "").rstrip("/")
+    api_key = os.getenv("CANVAS_API_KEY")
+    if not api_url or not api_key:
+        raise ValueError("Missing CANVAS_API_URL or CANVAS_API_KEY for REST fallback.")
+
+    url = f"{api_url}/api/v1/courses/{course_id}/assignments/{assignment_id}/submissions/{user_id}"
+    headers = {"Authorization": f"Bearer {api_key}"}
+    data = {
+        "submission[posted_grade]": posted_grade,
+    }
+    if comment:
+        data["comment[text_comment]"] = comment
+
+    response = requests.put(url, headers=headers, data=data, timeout=30)
+    response.raise_for_status()
+    if not response.text:
+        return {}
+    try:
+        return response.json()
+    except ValueError:
+        return {"raw_response": response.text}
+
+
 def post_submission_grade(course_id, assignment_id, user_id, posted_grade, comment=None, comment_format="text"):
     canvas = _get_canvas_client()
     course = canvas.get_course(course_id)
     assignment = course.get_assignment(assignment_id)
-    submission = assignment.get_submission(user_id)
+    before_submission = assignment.get_submission(user_id, include=["submission_comments"])
+    before_comment_count = _submission_comment_count(before_submission)
 
     payload = {"submission": {"posted_grade": posted_grade}}
     if comment:
         # Canvas consistently accepts text_comment; HTML content is sanitized/rendered server-side.
         payload["comment"] = {"text_comment": comment}
 
-    updated = submission.edit(**payload)
+    updated = before_submission.edit(**payload)
+
+    after_submission = assignment.get_submission(user_id, include=["submission_comments"])
+    after_comment_count = _submission_comment_count(after_submission)
+
+    used_rest_fallback = False
+    if comment and after_comment_count <= before_comment_count:
+        _post_grade_comment_via_rest(
+            course_id=course_id,
+            assignment_id=assignment_id,
+            user_id=user_id,
+            posted_grade=posted_grade,
+            comment=comment,
+        )
+        used_rest_fallback = True
+        after_submission = assignment.get_submission(user_id, include=["submission_comments"])
+        after_comment_count = _submission_comment_count(after_submission)
+
+    if comment and after_comment_count <= before_comment_count:
+        raise ValueError(
+            "Canvas grade update succeeded but no new submission comment appeared. "
+            "Please verify assignment comment permissions and submission visibility."
+        )
+
     return {
         "success": True,
         "course_id": course_id,
@@ -90,6 +146,9 @@ def post_submission_grade(course_id, assignment_id, user_id, posted_grade, comme
         "comment": comment,
         "comment_format": comment_format,
         "canvas_response": updated,
+        "used_rest_fallback": used_rest_fallback,
+        "before_comment_count": before_comment_count,
+        "after_comment_count": after_comment_count,
     }
 
 
