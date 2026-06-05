@@ -1,5 +1,6 @@
 """AI provider integration points for generating grading drafts."""
 
+import json
 import os
 from dataclasses import dataclass
 from pathlib import Path
@@ -43,6 +44,41 @@ class OpenAICompatibleProvider:
             lines.append(f"- {path}")
         return "\n".join(lines) if lines else "- No downloaded artifacts available"
 
+    @staticmethod
+    def _notebook_text_sample(content, max_chars_per_file):
+        try:
+            payload = json.loads(content)
+        except json.JSONDecodeError:
+            return None
+
+        cells = payload.get("cells") if isinstance(payload, dict) else None
+        if not isinstance(cells, list) or not cells:
+            return None
+
+        parts = []
+        for index, cell in enumerate(cells, start=1):
+            if not isinstance(cell, dict):
+                continue
+
+            cell_type = cell.get("cell_type", "unknown")
+            source = cell.get("source", "")
+            if isinstance(source, list):
+                text = "".join(source)
+            else:
+                text = str(source or "")
+
+            text = text.strip()
+            if not text:
+                continue
+
+            parts.append(f"[Cell {index} - {cell_type}]\n{text}")
+
+        if not parts:
+            return "Notebook file found, but cells contained no readable source text."
+
+        notebook_text = "\n\n".join(parts)
+        return notebook_text[:max_chars_per_file]
+
     def _read_text_samples(self, artifacts, max_files=3, max_chars_per_file=3000):
         samples = []
         for artifact in artifacts:
@@ -55,18 +91,38 @@ class OpenAICompatibleProvider:
             if not path.exists() or path.is_dir():
                 continue
 
-            suffix = path.suffix.lower()
-            if suffix not in {".py", ".txt", ".md", ".json", ".yaml", ".yml", ".csv", ".html", ".js", ".ts"}:
-                continue
-
             try:
                 content = path.read_text(encoding="utf-8", errors="ignore")
             except OSError:
                 continue
 
+            suffix = path.suffix.lower()
+            is_text_suffix = suffix in {
+                ".py",
+                ".txt",
+                ".md",
+                ".json",
+                ".yaml",
+                ".yml",
+                ".csv",
+                ".html",
+                ".js",
+                ".ts",
+            }
+            is_notebook_candidate = suffix == ".ipynb" or '"cells"' in content
+
+            extracted = None
+            if is_notebook_candidate:
+                extracted = self._notebook_text_sample(content, max_chars_per_file)
+
+            if extracted is None and not is_text_suffix:
+                continue
+
+            sample_text = extracted if extracted is not None else content[:max_chars_per_file]
+
             samples.append(
                 f"\n### File: {path.name}\n"
-                f"{content[:max_chars_per_file]}\n"
+                f"{sample_text}\n"
             )
 
         return "\n".join(samples) if samples else "No text samples could be extracted."
@@ -76,7 +132,9 @@ class OpenAICompatibleProvider:
         file_samples = self._read_text_samples(artifacts)
         return (
             "You are an instructional assistant grading a student assignment. "
-            "Return concise, actionable, and respectful feedback in markdown. "
+            "Return concise, actionable, and respectful feedback as HTML only. "
+            "Use simple tags only: <p>, <strong>, <em>, <ul>, <ol>, <li>, and <a>. "
+            "Do not use markdown formatting. "
             "Include sections: Summary, Strengths, Improvements, Suggested Next Steps, and Proposed Score. "
             "If evidence is insufficient, say so explicitly.\n\n"
             f"Student: {student_name}\n\n"
@@ -119,7 +177,10 @@ class OpenAICompatibleProvider:
             messages=[
                 {
                     "role": "system",
-                    "content": "You are a strict but constructive instructor assistant.",
+                    "content": (
+                        "You are a strict but constructive instructor assistant. "
+                        "Output valid HTML only using simple formatting tags."
+                    ),
                 },
                 {
                     "role": "user",

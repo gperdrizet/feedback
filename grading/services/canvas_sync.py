@@ -64,7 +64,7 @@ def _get_canvas_client():
         return Canvas(api_url, api_key)
 
 
-def post_submission_grade(course_id, assignment_id, user_id, posted_grade, comment=None):
+def post_submission_grade(course_id, assignment_id, user_id, posted_grade, comment=None, comment_format="text"):
     canvas = _get_canvas_client()
     course = canvas.get_course(course_id)
     assignment = course.get_assignment(assignment_id)
@@ -72,7 +72,10 @@ def post_submission_grade(course_id, assignment_id, user_id, posted_grade, comme
 
     payload = {"submission": {"posted_grade": posted_grade}}
     if comment:
-        payload["comment"] = {"text_comment": comment}
+        if comment_format == "html":
+            payload["comment"] = {"html_comment": comment}
+        else:
+            payload["comment"] = {"text_comment": comment}
 
     updated = submission.edit(**payload)
     return {
@@ -82,6 +85,7 @@ def post_submission_grade(course_id, assignment_id, user_id, posted_grade, comme
         "user_id": user_id,
         "posted_grade": posted_grade,
         "comment": comment,
+        "comment_format": comment_format,
         "canvas_response": updated,
     }
 
@@ -366,6 +370,7 @@ def post_submission_to_canvas(submission):
             user_id=submission.canvas_user_id,
             posted_grade=str(submission.final_score),
             comment=submission.final_feedback or "",
+            comment_format="html",
         )
         CanvasPostAttempt.objects.create(
             submission=submission,
