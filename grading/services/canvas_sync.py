@@ -1,5 +1,6 @@
 """Canvas sync services that consume canvas-instructor-tools APIs."""
 
+import json
 import os
 from datetime import datetime
 from pathlib import Path
@@ -49,6 +50,10 @@ def _latest_submissions_per_user(submissions):
             latest_by_user[user_id] = submission
 
     return list(latest_by_user.values())
+
+
+def _coerce_jsonable(value):
+    return json.loads(json.dumps(value, default=str))
 
 def _get_canvas_client():
     try:
@@ -372,15 +377,16 @@ def post_submission_to_canvas(submission):
             comment=submission.final_feedback or "",
             comment_format="html",
         )
+        safe_response = _coerce_jsonable(response)
         CanvasPostAttempt.objects.create(
             submission=submission,
             success=True,
-            response_payload=response,
+            response_payload=safe_response,
         )
         submission.review_status = SubmissionRecord.ReviewStatus.POSTED
         submission.posted_at = timezone.now()
         submission.save(update_fields=["review_status", "posted_at"])
-        return response
+        return safe_response
     except Exception as exc:  # noqa: BLE001
         CanvasPostAttempt.objects.create(
             submission=submission,
