@@ -372,6 +372,17 @@ def gradebook(request):
 	return render(request, "grading/gradebook.html", {"assignments": assignments})
 
 
+def delete_assignment(request, assignment_pk):
+	if request.method != "POST":
+		return redirect("grading:gradebook")
+
+	assignment = get_object_or_404(AssignmentConfig, pk=assignment_pk)
+	assignment_name = assignment.name
+	assignment.delete()
+	messages.success(request, f"Deleted assignment: {assignment_name}")
+	return redirect("grading:gradebook")
+
+
 def sync_assignment(request):
 	if request.method != "POST":
 		return redirect("grading:gradebook")

@@ -9,6 +9,7 @@
     th, td { padding: 0.6rem; border-bottom: 1px solid #d8d0c0; text-align: left; }
     .panel { background: #fffdf7; padding: 1rem; border: 1px solid #dfd7c8; border-radius: 8px; }
     .messages { margin: 1rem 0; }
+    .danger { background: #fff0f0; border: 1px solid #b03a3a; color: #7d1f1f; border-radius: 6px; padding: 0.35rem 0.6rem; cursor: pointer; }
   </style>
 </head>
 <body>
@@ -41,6 +42,7 @@
         <th>Submissions</th>
         <th>Updated</th>
         <th>Review</th>
+        <th>Delete</th>
       </tr>
     </thead>
     <tbody>
@@ -51,9 +53,15 @@
         <td>{{ assignment.submissions.count }}</td>
         <td>{{ assignment.synced_at }}</td>
         <td><a href="{% url 'grading:assignment_detail' assignment.pk %}">Open</a></td>
+        <td>
+          <form method="post" action="{% url 'grading:delete_assignment' assignment.pk %}" onsubmit="return confirm('Delete this assignment and all synced submissions?');">
+            {% csrf_token %}
+            <button type="submit" class="danger">Delete</button>
+          </form>
+        </td>
       </tr>
       {% empty %}
-      <tr><td colspan="5">No assignments synced yet.</td></tr>
+      <tr><td colspan="6">No assignments synced yet.</td></tr>
       {% endfor %}
     </tbody>
   </table>

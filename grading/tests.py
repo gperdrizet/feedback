@@ -84,6 +84,13 @@ class ReviewWorkflowTests(TestCase):
 		self.assertEqual(payload["job"]["current_student_name"], "Bob")
 		self.assertEqual(len(payload["submissions"]), 3)
 
+	def test_delete_assignment_removes_record(self):
+		response = self.client.post(reverse("grading:delete_assignment", args=[self.assignment.pk]))
+
+		self.assertEqual(response.status_code, 302)
+		self.assertEqual(response.headers["Location"], reverse("grading:gradebook"))
+		self.assertFalse(AssignmentConfig.objects.filter(pk=self.assignment.pk).exists())
+
 	def test_submission_review_shows_navigation_links(self):
 		response = self.client.get(reverse("grading:submission_detail", args=[self.second_submission.pk]))
 
