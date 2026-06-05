@@ -27,7 +27,32 @@ from grading.services.canvas_sync import (
 
 
 def _ordered_assignment_submissions(assignment):
-	return assignment.submissions.all().order_by("student_name", "canvas_submission_id")
+	latest_by_user = {}
+	for submission in assignment.submissions.all():
+		current = latest_by_user.get(submission.canvas_user_id)
+		if current is None:
+			latest_by_user[submission.canvas_user_id] = submission
+			continue
+
+		if submission.submitted_at and current.submitted_at:
+			if submission.submitted_at > current.submitted_at:
+				latest_by_user[submission.canvas_user_id] = submission
+				continue
+			if submission.submitted_at < current.submitted_at:
+				continue
+		elif submission.submitted_at and not current.submitted_at:
+			latest_by_user[submission.canvas_user_id] = submission
+			continue
+		elif not submission.submitted_at and current.submitted_at:
+			continue
+
+		if submission.canvas_submission_id > current.canvas_submission_id:
+			latest_by_user[submission.canvas_user_id] = submission
+
+	return sorted(
+		latest_by_user.values(),
+		key=lambda item: (item.student_name.lower(), item.canvas_submission_id),
+	)
 
 
 def _serialize_submission_row(submission):

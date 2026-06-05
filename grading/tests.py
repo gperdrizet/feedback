@@ -2,10 +2,12 @@ import json
 import tempfile
 from pathlib import Path
 from decimal import Decimal
+from datetime import timedelta
 from unittest.mock import Mock, patch
 
 from django.test import TestCase
 from django.urls import reverse
+from django.utils import timezone
 
 from grading.models import AssignmentConfig, BatchReviewJob, CourseSync, SubmissionArtifact, SubmissionRecord
 
@@ -83,6 +85,28 @@ class ReviewWorkflowTests(TestCase):
 		self.assertEqual(payload["job"]["status"], BatchReviewJob.Status.RUNNING)
 		self.assertEqual(payload["job"]["current_student_name"], "Bob")
 		self.assertEqual(len(payload["submissions"]), 3)
+
+	def test_assignment_views_use_latest_submission_per_student(self):
+		SubmissionRecord.objects.create(
+			assignment=self.assignment,
+			canvas_submission_id=99,
+			canvas_user_id=self.first_submission.canvas_user_id,
+			student_name=self.first_submission.student_name,
+			submitted_at=timezone.now() + timedelta(minutes=1),
+			proposed_score=Decimal("97.00"),
+		)
+
+		status_response = self.client.get(reverse("grading:assignment_batch_status", args=[self.assignment.pk]))
+		status_payload = status_response.json()
+
+		self.assertEqual(status_response.status_code, 200)
+		self.assertEqual(len(status_payload["submissions"]), 3)
+
+		assignment_response = self.client.get(reverse("grading:assignment_detail", args=[self.assignment.pk]))
+		self.assertEqual(assignment_response.status_code, 200)
+		rendered_ids = [submission.canvas_submission_id for submission in assignment_response.context["submissions"]]
+		self.assertIn(99, rendered_ids)
+		self.assertNotIn(self.first_submission.canvas_submission_id, rendered_ids)
 
 	def test_delete_assignment_removes_record(self):
 		response = self.client.post(reverse("grading:delete_assignment", args=[self.assignment.pk]))

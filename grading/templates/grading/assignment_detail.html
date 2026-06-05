@@ -17,6 +17,8 @@
     .stat-chip { border: 1px solid #d8d0c0; border-radius: 999px; padding: 0.25rem 0.65rem; font-size: 0.9rem; background: #fff; }
     .job-status { margin-top: 0.75rem; font-size: 0.95rem; }
     .job-status.error { color: #a22424; }
+    .table-note { margin: 1rem 0 0.35rem; }
+    .table-note .stat-chip { background: #fff7eb; border-color: #e3c9ac; color: #6f2c00; }
   </style>
 </head>
 <body>
@@ -34,7 +36,7 @@
 
   <div class="panel">
     <h2>Batch Review</h2>
-    <p>Download the latest submissions from Canvas and generate AI drafts for every synced submission.</p>
+    <p>Download from Canvas and generate AI drafts for only the latest submission per student.</p>
     <form method="post" class="actions">
       {% csrf_token %}
       <input type="hidden" name="action" value="batch_review">
@@ -57,6 +59,10 @@
       <div id="batch-summary" class="job-status"></div>
       <div id="batch-last-error" class="job-status error"></div>
     </div>
+  </div>
+
+  <div class="table-note">
+    <span class="stat-chip">Showing only the latest submission per student</span>
   </div>
 
   <table>

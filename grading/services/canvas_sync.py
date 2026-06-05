@@ -9,6 +9,47 @@ from canvasapi import Canvas
 from dotenv import load_dotenv
 from django.utils import timezone
 
+
+def _coerce_canvas_datetime(value):
+    if not value:
+        return None
+    if isinstance(value, datetime):
+        return value
+    try:
+        normalized = str(value).replace("Z", "+00:00")
+        return datetime.fromisoformat(normalized)
+    except ValueError:
+        return None
+
+
+def _is_newer_submission(candidate, current):
+    candidate_dt = _coerce_canvas_datetime(getattr(candidate, "submitted_at", None))
+    current_dt = _coerce_canvas_datetime(getattr(current, "submitted_at", None))
+
+    if candidate_dt and current_dt:
+        if candidate_dt != current_dt:
+            return candidate_dt > current_dt
+    elif candidate_dt and not current_dt:
+        return True
+    elif not candidate_dt and current_dt:
+        return False
+
+    return (getattr(candidate, "id", 0) or 0) > (getattr(current, "id", 0) or 0)
+
+
+def _latest_submissions_per_user(submissions):
+    latest_by_user = {}
+    for submission in submissions:
+        user_id = getattr(submission, "user_id", None)
+        if user_id is None:
+            continue
+
+        current = latest_by_user.get(user_id)
+        if current is None or _is_newer_submission(submission, current):
+            latest_by_user[user_id] = submission
+
+    return list(latest_by_user.values())
+
 def _get_canvas_client():
     try:
         from canvas_tools.client import get_client as package_get_client
@@ -54,7 +95,8 @@ def list_assignment_submissions(course_id, assignment_id, include_history=True):
         include.append("submission_history")
 
     payloads = []
-    for submission in assignment.get_submissions(include=include):
+    submissions = _latest_submissions_per_user(assignment.get_submissions(include=include))
+    for submission in submissions:
         user = getattr(submission, "user", None)
         attachments = []
         for attachment in getattr(submission, "attachments", []) or []:
@@ -116,7 +158,9 @@ def download_submission_artifacts(course_id, assignment_id, output_dir=".", incl
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     result = {"downloaded_count": 0, "errors": [], "artifacts": []}
-    submissions = assignment.get_submissions(include=["user", "submission_history"])
+    submissions = _latest_submissions_per_user(
+        assignment.get_submissions(include=["user", "submission_history"])
+    )
 
     for submission in submissions:
         user = getattr(submission, "user", None)
@@ -236,6 +280,14 @@ def sync_assignment(course_id, assignment_id, download_root):
         )
         record.artifacts.all().delete()
         records_by_canvas_submission_id[payload["id"]] = record
+
+    keep_submission_ids = set(records_by_canvas_submission_id.keys())
+    if keep_submission_ids:
+        SubmissionRecord.objects.filter(assignment=assignment).exclude(
+            canvas_submission_id__in=keep_submission_ids
+        ).delete()
+    else:
+        SubmissionRecord.objects.filter(assignment=assignment).delete()
 
     for artifact in artifact_results["artifacts"]:
         submission = records_by_canvas_submission_id.get(artifact.get("submission_id"))
