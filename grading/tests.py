@@ -3,6 +3,7 @@ import tempfile
 from pathlib import Path
 from decimal import Decimal
 from datetime import timedelta
+from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
 from django.test import TestCase
@@ -10,6 +11,8 @@ from django.urls import reverse
 from django.utils import timezone
 
 from grading.models import AssignmentConfig, BatchReviewJob, CourseSync, SubmissionArtifact, SubmissionRecord
+from grading.services.ai_provider import OpenAICompatibleProvider
+from grading.services.canvas_sync import post_submission_to_canvas
 
 
 class ReviewWorkflowTests(TestCase):
@@ -156,6 +159,26 @@ class ReviewWorkflowTests(TestCase):
 		self.assertEqual(self.first_submission.final_score, Decimal("87"))
 		self.assertEqual(self.first_submission.final_feedback, "Ready to post.")
 
+	@patch("grading.services.canvas_sync.post_submission_grade")
+	def test_post_to_canvas_sends_html_comment(self, mock_post_grade):
+		mock_post_grade.return_value = {"ok": True}
+		self.first_submission.review_status = SubmissionRecord.ReviewStatus.APPROVED
+		self.first_submission.final_score = Decimal("91.00")
+		self.first_submission.final_feedback = (
+			"<p><strong>Summary</strong></p>"
+			"<ul><li>Great work on feature engineering.</li></ul>"
+			"<p>See <a href='https://example.com'>notes</a>.</p>"
+		)
+		self.first_submission.save(update_fields=["review_status", "final_score", "final_feedback"])
+
+		post_submission_to_canvas(self.first_submission)
+
+		self.assertTrue(mock_post_grade.called)
+		kwargs = mock_post_grade.call_args.kwargs
+		self.assertEqual(kwargs["posted_grade"], "91.00")
+		self.assertEqual(kwargs["comment_format"], "html")
+		self.assertEqual(kwargs["comment"], self.first_submission.final_feedback)
+
 	def test_submission_review_renders_local_notebook_artifact(self):
 		notebook_path = self._write_notebook(
 			"submission.ipynb",
@@ -237,3 +260,17 @@ class ReviewWorkflowTests(TestCase):
 		self.assertContains(response, "Python cell")
 		self.assertContains(response, "greet")
 		self.assertContains(response, "highlight")
+
+	def test_ai_provider_extracts_notebook_cells_for_prompt(self):
+		notebook_path = self._write_notebook(
+			"prompt_sample.ipynb",
+			[
+				{"cell_type": "markdown", "metadata": {}, "source": ["# Header\n", "Some notes\n"]},
+				{"cell_type": "code", "metadata": {}, "source": ["print('hello notebook')\n"]},
+			],
+		)
+		provider = object.__new__(OpenAICompatibleProvider)
+		samples = provider._read_text_samples([SimpleNamespace(local_path=str(notebook_path))])
+
+		self.assertIn("Header", samples)
+		self.assertIn("hello notebook", samples)
