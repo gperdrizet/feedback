@@ -179,6 +179,19 @@ class ReviewWorkflowTests(TestCase):
 		self.assertEqual(kwargs["comment_format"], "html")
 		self.assertEqual(kwargs["comment"], self.first_submission.final_feedback)
 
+	@patch("grading.services.canvas_sync.post_submission_grade")
+	def test_post_to_canvas_coerces_non_json_response_payload(self, mock_post_grade):
+		mock_post_grade.return_value = {"canvas_response": object(), "ok": True}
+		self.first_submission.review_status = SubmissionRecord.ReviewStatus.APPROVED
+		self.first_submission.final_score = Decimal("92.00")
+		self.first_submission.final_feedback = "<p>Ready to post</p>"
+		self.first_submission.save(update_fields=["review_status", "final_score", "final_feedback"])
+
+		response = post_submission_to_canvas(self.first_submission)
+
+		self.assertEqual(response["ok"], True)
+		self.assertIsInstance(response["canvas_response"], str)
+
 	def test_submission_review_renders_local_notebook_artifact(self):
 		notebook_path = self._write_notebook(
 			"submission.ipynb",
