@@ -19,8 +19,16 @@
     .submission-header h1 { margin: 0; }
     .header-meta { display: flex; gap: 0.4rem; flex-wrap: wrap; margin: 0; }
     .meta-chip { display: inline-block; background: #fffdf7; border: 1px solid #dfd7c8; border-radius: 999px; padding: 0.2rem 0.55rem; font-size: 0.85rem; color: #5a4f41; }
-    textarea { width: 100%; flex: 1 1 0; min-height: 0; resize: none; overflow-x: hidden; word-break: break-word; box-sizing: border-box; }
     input[type="text"] { width: 12rem; }
+    .rich-editor { display: flex; flex-direction: column; flex: 1 1 0; min-height: 0; border: 1px solid #ccc; border-radius: 4px; overflow: hidden; background: #fff; }
+    .rich-editor-toolbar { flex-shrink: 0; display: flex; align-items: center; gap: 0.25rem; padding: 0.35rem 0.5rem; background: #f0ece4; border-bottom: 1px solid #dfd7c8; }
+    .toolbar-btn { background: none; border: 1px solid transparent; border-radius: 4px; padding: 0.2rem 0.5rem; cursor: pointer; font-size: 0.875rem; color: #5a4f41; line-height: 1; font-family: Georgia, serif; }
+    .toolbar-btn:hover { background: #e8e0d2; border-color: #c8bfb0; }
+    .toolbar-btn.active { background: #dfd7c8; border-color: #b8afa0; }
+    .toolbar-sep { width: 1px; height: 1.25rem; background: #dfd7c8; margin: 0 0.2rem; flex-shrink: 0; }
+    .rich-editor-body { flex: 1 1 0; min-height: 0; overflow-y: auto; overflow-x: hidden; padding: 0.6rem 0.75rem; outline: none; word-break: break-word; line-height: 1.55; }
+    .rich-editor-body:focus { box-shadow: inset 0 0 0 2px rgba(138,50,0,0.18); }
+    .rich-editor-body:empty::before { content: attr(data-placeholder); color: #aaa; pointer-events: none; display: block; }
     .inline-actions { display: flex; gap: 0.75rem; flex-wrap: wrap; }
     .muted { color: #665; }
     .listless { list-style: none; padding-left: 0; margin: 0; }
@@ -58,7 +66,7 @@
       .workspace-editor-column { position: static; top: auto; }
       .workspace-panel { height: auto; overflow: visible; }
       .workspace-panel-scroll { overflow: visible; }
-      textarea { min-height: 240px; flex: none; }
+      .rich-editor-body { min-height: 240px; flex: none; }
     }
     {% if submission_preview %}{{ submission_preview.pygments_css }}{% endif %}
   </style>
@@ -134,7 +142,22 @@
           {% csrf_token %}
           <div class="editor-fields">
             <p><label>Feedback</label></p>
-            <textarea name="final_feedback">{{ submission.final_feedback|default:submission.proposed_feedback }}</textarea>
+            <div class="rich-editor">
+              <div class="rich-editor-toolbar" role="toolbar" aria-label="Text formatting">
+                <button type="button" class="toolbar-btn" id="btn-bold" onmousedown="event.preventDefault()" onclick="editorFormat('bold')" title="Bold"><strong>B</strong></button>
+                <button type="button" class="toolbar-btn" id="btn-italic" onmousedown="event.preventDefault()" onclick="editorFormat('italic')" title="Italic"><em>I</em></button>
+                <button type="button" class="toolbar-btn" id="btn-underline" onmousedown="event.preventDefault()" onclick="editorFormat('underline')" title="Underline"><u>U</u></button>
+                <div class="toolbar-sep"></div>
+                <button type="button" class="toolbar-btn" id="btn-ul" onmousedown="event.preventDefault()" onclick="editorFormat('insertUnorderedList')" title="Bullet list">&#8226;&nbsp;List</button>
+                <button type="button" class="toolbar-btn" id="btn-ol" onmousedown="event.preventDefault()" onclick="editorFormat('insertOrderedList')" title="Numbered list">1.&nbsp;List</button>
+              </div>
+              <div id="feedback-editor"
+                   class="rich-editor-body"
+                   contenteditable="true"
+                   spellcheck="true"
+                   data-placeholder="No feedback yet. Generate a draft or type here.">{{ submission.final_feedback|default:submission.proposed_feedback|safe }}</div>
+            </div>
+            <input type="hidden" name="final_feedback" id="final-feedback-hidden">
           </div>
           <p class="inline-actions review-actions">
             <label class="score-control">Score <input type="text" name="final_score" value="{{ submission.final_score|default:submission.proposed_score|default:'' }}"></label>
@@ -148,5 +171,38 @@
     </section>
   </div>
 
+<script>
+(function () {
+  var editor = document.getElementById('feedback-editor');
+  var hidden = document.getElementById('final-feedback-hidden');
+
+  function editorFormat(cmd) {
+    editor.focus();
+    document.execCommand(cmd, false, null);
+    updateToolbarState();
+  }
+
+  function updateToolbarState() {
+    document.getElementById('btn-bold').classList.toggle('active', document.queryCommandState('bold'));
+    document.getElementById('btn-italic').classList.toggle('active', document.queryCommandState('italic'));
+    document.getElementById('btn-underline').classList.toggle('active', document.queryCommandState('underline'));
+  }
+
+  editor.addEventListener('keyup', updateToolbarState);
+  editor.addEventListener('mouseup', updateToolbarState);
+  document.addEventListener('selectionchange', function () {
+    if (document.activeElement === editor) {
+      updateToolbarState();
+    }
+  });
+
+  // Sync editor HTML into the hidden input before every form submission.
+  document.querySelector('.editor-form').addEventListener('submit', function () {
+    hidden.value = editor.innerHTML;
+  });
+
+  window.editorFormat = editorFormat;
+}());
+</script>
 </body>
 </html>
