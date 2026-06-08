@@ -98,6 +98,31 @@ class AIFeedbackDraft(models.Model):
     created_at = models.DateTimeField(default=timezone.now)
 
 
+class RubricCriterion(models.Model):
+    assignment = models.ForeignKey(AssignmentConfig, on_delete=models.CASCADE, related_name="rubric_criteria")
+    name = models.CharField(max_length=500)
+    order = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        ordering = ["order", "pk"]
+
+    def __str__(self):
+        return self.name
+
+
+class RubricLevel(models.Model):
+    criterion = models.ForeignKey(RubricCriterion, on_delete=models.CASCADE, related_name="levels")
+    points = models.DecimalField(max_digits=8, decimal_places=2)
+    description = models.TextField(blank=True)
+    order = models.PositiveSmallIntegerField(default=0)
+
+    class Meta:
+        ordering = ["order", "-points"]
+
+    def __str__(self):
+        return f"{self.points}pts"
+
+
 class ApprovalDecision(models.Model):
     class DecisionStatus(models.TextChoices):
         PENDING = "pending", "Pending"

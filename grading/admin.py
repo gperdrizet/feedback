@@ -6,6 +6,8 @@ from grading.models import (
 	AssignmentConfig,
 	CanvasPostAttempt,
 	CourseSync,
+	RubricCriterion,
+	RubricLevel,
 	SubmissionArtifact,
 	SubmissionRecord,
 )
@@ -17,3 +19,5 @@ admin.site.register(SubmissionArtifact)
 admin.site.register(AIFeedbackDraft)
 admin.site.register(ApprovalDecision)
 admin.site.register(CanvasPostAttempt)
+admin.site.register(RubricCriterion)
+admin.site.register(RubricLevel)

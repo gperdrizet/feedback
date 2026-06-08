@@ -17,7 +17,7 @@ from pygments.formatters import HtmlFormatter
 from pygments.lexers import get_lexer_by_name, guess_lexer, TextLexer
 from pygments.util import ClassNotFound
 
-from grading.models import AssignmentConfig, BatchReviewJob, SubmissionRecord
+from grading.models import AssignmentConfig, BatchReviewJob, RubricCriterion, RubricLevel, SubmissionRecord
 from grading.services.canvas_sync import (
 	approve_submission,
 	generate_ai_draft,
@@ -446,11 +446,48 @@ def assignment_detail(request, assignment_pk):
 				messages.success(request, "Batch review started.")
 			else:
 				messages.info(request, "A batch review job is already running for this assignment.")
+		elif action == "save_rubric":
+			try:
+				criteria_data = json.loads(request.POST.get("rubric_json", "[]"))
+				assignment.rubric_criteria.all().delete()
+				for idx, crit in enumerate(criteria_data):
+					name = (crit.get("name") or "").strip()
+					if not name:
+						continue
+					criterion = RubricCriterion.objects.create(
+						assignment=assignment,
+						name=name,
+						order=idx,
+					)
+					for lidx, level in enumerate(crit.get("levels") or []):
+						points_raw = (level.get("points") or "").strip() if isinstance(level.get("points"), str) else level.get("points")
+						if points_raw is None or points_raw == "":
+							continue
+						RubricLevel.objects.create(
+							criterion=criterion,
+							points=points_raw,
+							description=(level.get("description") or "").strip(),
+							order=lidx,
+						)
+				messages.success(request, "Rubric saved.")
+			except (json.JSONDecodeError, ValueError, TypeError) as exc:
+				messages.error(request, f"Failed to save rubric: {exc}")
 
 		return redirect("grading:assignment_detail", assignment_pk=assignment.pk)
 
 	submissions = _ordered_assignment_submissions(assignment)
 	latest_job = assignment.batch_jobs.order_by("-created_at").first()
+	rubric_criteria = list(assignment.rubric_criteria.prefetch_related("levels").all())
+	rubric_data = [
+		{
+			"name": c.name,
+			"levels": [
+				{"points": str(level.points), "description": level.description}
+				for level in c.levels.all()
+			],
+		}
+		for c in rubric_criteria
+	]
 	return render(
 		request,
 		"grading/assignment_detail.html",
@@ -458,6 +495,7 @@ def assignment_detail(request, assignment_pk):
 			"assignment": assignment,
 			"submissions": submissions,
 			"latest_batch_job": latest_job,
+			"rubric_data": rubric_data,
 		},
 	)
 

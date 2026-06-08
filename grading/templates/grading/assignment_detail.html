@@ -19,6 +19,26 @@
     .job-status.error { color: #a22424; }
     .table-note { margin: 1rem 0 0.35rem; }
     .table-note .stat-chip { background: #fff7eb; border-color: #e3c9ac; color: #6f2c00; }
+    /* Rubric editor */
+    .rubric-table { border: 1px solid #dfd7c8; border-radius: 6px; overflow: hidden; margin: 0.75rem 0 1rem; }
+    .rubric-table-header { display: grid; grid-template-columns: 1fr 2fr; background: #f0ece4; border-bottom: 2px solid #dfd7c8; }
+    .rubric-table-header > div { padding: 0.45rem 0.75rem; font-size: 0.8rem; font-weight: bold; text-transform: uppercase; letter-spacing: 0.06em; color: #5a4f41; }
+    .rubric-table-header > div:first-child { border-right: 1px solid #dfd7c8; }
+    .rubric-item { display: grid; grid-template-columns: 1fr 2fr; border-bottom: 1px solid #dfd7c8; }
+    .rubric-item:last-child { border-bottom: none; }
+    .rubric-criterion-col { padding: 0.75rem; border-right: 1px solid #dfd7c8; display: flex; flex-direction: column; gap: 0.5rem; background: #fdfaf4; }
+    .rubric-scale-col { padding: 0.75rem; display: flex; flex-direction: column; gap: 0.35rem; }
+    .criterion-name-input { width: 100%; box-sizing: border-box; font-size: 0.95rem; }
+    .remove-criterion-btn { align-self: flex-start; background: none; border: none; cursor: pointer; color: #a22424; font-size: 0.82rem; padding: 0; text-decoration: underline; }
+    .scale-level { display: flex; align-items: center; gap: 0.4rem; }
+    .level-points { width: 4.5rem; font-size: 0.9rem; }
+    .pts-label { flex-shrink: 0; color: #888; font-size: 0.85rem; }
+    .level-desc { flex: 1; font-size: 0.9rem; }
+    .remove-level-btn { background: none; border: none; cursor: pointer; color: #a22424; font-size: 1.1rem; line-height: 1; padding: 0 0.15rem; flex-shrink: 0; }
+    .add-level-btn { align-self: flex-start; background: none; border: 1px dashed #b8afa0; border-radius: 4px; cursor: pointer; color: #5a4f41; font-size: 0.82rem; padding: 0.2rem 0.55rem; margin-top: 0.1rem; }
+    .add-level-btn:hover { background: #f0ece4; }
+    .rubric-empty { padding: 0.75rem; color: #888; font-size: 0.9rem; font-style: italic; border-bottom: 1px solid #dfd7c8; }
+    .rubric-footer { display: flex; align-items: center; gap: 0.75rem; margin-top: 0.5rem; }
   </style>
 </head>
 <body>
@@ -61,6 +81,30 @@
     </div>
   </div>
 
+  {{ rubric_data|json_script:"rubric-initial-data" }}
+  <div class="panel">
+    <h2>Scoring Rubric</h2>
+    <p>Define criteria and point scales. Each criterion appears as a row; the scale lists each score level with a point value and description.</p>
+    <form method="post" id="rubric-form">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="save_rubric">
+      <input type="hidden" name="rubric_json" id="rubric-json-field">
+      <div class="rubric-table">
+        <div class="rubric-table-header">
+          <div>Criterion</div>
+          <div>Scale</div>
+        </div>
+        <div id="rubric-criteria-list">
+          <div id="rubric-empty" class="rubric-empty">No criteria yet. Click &ldquo;+ Add Criterion&rdquo; to get started.</div>
+        </div>
+      </div>
+      <div class="rubric-footer">
+        <button type="button" id="add-criterion-btn" class="button">+ Add Criterion</button>
+        <button type="submit" class="button primary">Save Rubric</button>
+      </div>
+    </form>
+  </div>
+
   <div class="table-note">
     <span class="stat-chip">Showing only the latest submission per student</span>
   </div>
@@ -93,8 +137,111 @@
   </table>
 
   <script>
+    // ── Rubric editor ──────────────────────────────────────────────
     (function () {
-      const root = document.getElementById("batch-progress");
+      var list = document.getElementById('rubric-criteria-list');
+      var emptyNote = document.getElementById('rubric-empty');
+
+      function esc(str) {
+        return String(str == null ? '' : str)
+          .replace(/&/g, '&amp;')
+          .replace(/"/g, '&quot;')
+          .replace(/</g, '&lt;')
+          .replace(/>/g, '&gt;');
+      }
+
+      function updateEmpty() {
+        var hasRows = list.querySelector('.rubric-item') !== null;
+        emptyNote.style.display = hasRows ? 'none' : '';
+      }
+
+      function makeLevelRow(points, description) {
+        var row = document.createElement('div');
+        row.className = 'scale-level';
+        row.innerHTML =
+          '<input type="number" class="level-points" placeholder="Pts" min="0" step="0.5" value="' + esc(points) + '">' +
+          '<span class="pts-label">pts:</span>' +
+          '<input type="text" class="level-desc" placeholder="Describe this score level\u2026" value="' + esc(description) + '">' +
+          '<button type="button" class="remove-level-btn" title="Remove level">&times;</button>';
+        row.querySelector('.remove-level-btn').addEventListener('click', function () {
+          row.remove();
+        });
+        return row;
+      }
+
+      function makeCriterionRow(name, levels) {
+        var item = document.createElement('div');
+        item.className = 'rubric-item';
+
+        var critCol = document.createElement('div');
+        critCol.className = 'rubric-criterion-col';
+        critCol.innerHTML =
+          '<input type="text" class="criterion-name-input" placeholder="Criterion name" value="' + esc(name) + '">' +
+          '<button type="button" class="remove-criterion-btn">Remove criterion</button>';
+        critCol.querySelector('.remove-criterion-btn').addEventListener('click', function () {
+          item.remove();
+          updateEmpty();
+        });
+
+        var scaleCol = document.createElement('div');
+        scaleCol.className = 'rubric-scale-col';
+
+        (levels || []).forEach(function (level) {
+          scaleCol.appendChild(makeLevelRow(level.points, level.description));
+        });
+
+        var addLevelBtn = document.createElement('button');
+        addLevelBtn.type = 'button';
+        addLevelBtn.className = 'add-level-btn';
+        addLevelBtn.textContent = '+ Add Level';
+        addLevelBtn.addEventListener('click', function () {
+          var newRow = makeLevelRow('', '');
+          scaleCol.insertBefore(newRow, addLevelBtn);
+          newRow.querySelector('.level-points').focus();
+        });
+        scaleCol.appendChild(addLevelBtn);
+
+        item.appendChild(critCol);
+        item.appendChild(scaleCol);
+        return item;
+      }
+
+      // Load saved rubric from server
+      var initialData = JSON.parse(document.getElementById('rubric-initial-data').textContent || '[]');
+      initialData.forEach(function (crit) {
+        list.appendChild(makeCriterionRow(crit.name, crit.levels));
+      });
+      updateEmpty();
+
+      document.getElementById('add-criterion-btn').addEventListener('click', function () {
+        var row = makeCriterionRow('', [{ points: '', description: '' }]);
+        list.appendChild(row);
+        row.querySelector('.criterion-name-input').focus();
+        updateEmpty();
+      });
+
+      // Serialize to JSON before form submit
+      document.getElementById('rubric-form').addEventListener('submit', function () {
+        var criteria = [];
+        list.querySelectorAll('.rubric-item').forEach(function (item) {
+          var nameInput = item.querySelector('.criterion-name-input');
+          var name = nameInput ? nameInput.value.trim() : '';
+          if (!name) { return; }
+          var levels = [];
+          item.querySelectorAll('.scale-level').forEach(function (levelRow) {
+            var pts = levelRow.querySelector('.level-points').value.trim();
+            var desc = levelRow.querySelector('.level-desc').value.trim();
+            if (pts !== '') {
+              levels.push({ points: pts, description: desc });
+            }
+          });
+          criteria.push({ name: name, levels: levels });
+        });
+        document.getElementById('rubric-json-field').value = JSON.stringify(criteria);
+      });
+    }());
+
+    // ── Batch job polling ──────────────────────────────────────────
       if (!root) {
         return;
       }
