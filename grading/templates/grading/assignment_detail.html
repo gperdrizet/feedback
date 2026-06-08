@@ -242,6 +242,8 @@
     }());
 
     // ── Batch job polling ──────────────────────────────────────────
+    (function () {
+      const root = document.getElementById("batch-progress");
       if (!root) {
         return;
       }
