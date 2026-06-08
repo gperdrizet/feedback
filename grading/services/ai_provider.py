@@ -127,22 +127,70 @@ class OpenAICompatibleProvider:
 
         return "\n".join(samples) if samples else "No text samples could be extracted."
 
-    def _build_prompt(self, assignment_description, student_name, artifacts):
+    @staticmethod
+    def _build_rubric_block(rubric):
+        """Return a plain-text rubric section for the prompt, or an empty string."""
+        if not rubric:
+            return ""
+
+        lines = ["Scoring Rubric:", ""]
+        for criterion in rubric:
+            lines.append(f"Criterion: {criterion['name']}")
+            for level in criterion.get("levels", []):
+                lines.append(f"  - {level['points']} pts: {level['description']}")
+            lines.append("")
+        return "\n".join(lines)
+
+    def _build_prompt(self, assignment_description, student_name, artifacts, rubric=None, extra_instructions=None):
         artifact_summary = self._artifact_summary(artifacts)
         file_samples = self._read_text_samples(artifacts)
+        rubric_block = self._build_rubric_block(rubric)
+
+        if rubric_block:
+            scoring_instruction = (
+                "Structure your response in two parts. "
+                "Part 1 — Narrative feedback: write specific, substantive comments about this "
+                "particular submission. Include the following sections, each as its own paragraph "
+                "or list: Summary (what the student did overall), Strengths (specific things done "
+                "well with evidence from the submission), Areas for Improvement (concrete, "
+                "actionable suggestions tied to the work), and Suggested Next Steps. "
+                "Part 2 — Score breakdown: apply the rubric below. For each criterion, select "
+                "the scale level that best matches the submission and note the point value. "
+                "Present this as an HTML table with columns Criterion, Selected Level Description, "
+                "and Points, followed by a Total row with the summed score. "
+                "Use only these HTML tags: <p>, <strong>, <em>, <ul>, <ol>, <li>, <table>, "
+                "<thead>, <tbody>, <tr>, <th>, <td>. "
+                "Do not use markdown formatting."
+            )
+        else:
+            scoring_instruction = (
+                "Return concise, actionable, and respectful feedback as HTML only. "
+                "Use simple tags only: <p>, <strong>, <em>, <ul>, <ol>, <li>. "
+                "Do not use markdown formatting. "
+                "Include sections: Summary, Strengths, Improvements, Suggested Next Steps, "
+                "and Proposed Score."
+            )
+
+        rubric_section = f"\n{rubric_block}\n" if rubric_block else ""
+
+        extra_section = (
+            f"\nAdditional instructor guidance for this assignment:\n{extra_instructions.strip()}\n"
+            if extra_instructions and extra_instructions.strip()
+            else ""
+        )
+
         return (
-            "You are an instructional assistant grading a student assignment. "
-            "Return concise, actionable, and respectful feedback as HTML only. "
-            "Use simple tags only: <p>, <strong>, <em>, <ul>, <ol>, <li>, and <a>. "
-            "Do not use markdown formatting. "
-            "Include sections: Summary, Strengths, Improvements, Suggested Next Steps, and Proposed Score. "
-            "If evidence is insufficient, say so explicitly.\n\n"
+            f"You are an instructional assistant grading a student assignment. "
+            f"{scoring_instruction} "
+            f"If evidence is insufficient, say so explicitly.\n\n"
             f"Student: {student_name}\n\n"
-            "Assignment description from Canvas:\n"
-            f"{assignment_description[:8000]}\n\n"
-            "Artifacts available:\n"
+            f"Assignment description from Canvas:\n"
+            f"{assignment_description[:8000]}\n"
+            f"{rubric_section}"
+            f"{extra_section}\n"
+            f"Artifacts available:\n"
             f"{artifact_summary}\n\n"
-            "Extracted text samples from submitted files:\n"
+            f"Extracted text samples from submitted files:\n"
             f"{file_samples}\n"
         )
 
@@ -164,11 +212,13 @@ class OpenAICompatibleProvider:
             return "\n".join(parts).strip()
         return ""
 
-    def generate_feedback(self, assignment_description, student_name, artifacts):
+    def generate_feedback(self, assignment_description, student_name, artifacts, rubric=None, extra_instructions=None):
         prompt = self._build_prompt(
             assignment_description=assignment_description,
             student_name=student_name,
             artifacts=artifacts,
+            rubric=rubric,
+            extra_instructions=extra_instructions,
         )
 
         response = self.client.chat.completions.create(

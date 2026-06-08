@@ -105,6 +105,19 @@
     </form>
   </div>
 
+  <div class="panel">
+    <h2>Additional Feedback Instructions</h2>
+    <p class="muted">Optional. Use this to give the model extra context or guidance specific to this assignment — for example, common mistakes to watch for, tone preferences, or topics to emphasise. Leave blank if not needed. Changes take effect on the next draft generation.</p>
+    <form method="post">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="save_instructions">
+      <textarea name="additional_instructions" rows="5" style="width:100%;box-sizing:border-box;font-family:inherit;font-size:0.95rem;">{{ additional_instructions }}</textarea>
+      <p style="margin-top:0.5rem;">
+        <button type="submit" class="button primary">Save Instructions</button>
+      </p>
+    </form>
+  </div>
+
   <div class="table-note">
     <span class="stat-chip">Showing only the latest submission per student</span>
   </div>

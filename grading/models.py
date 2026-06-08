@@ -23,6 +23,7 @@ class AssignmentConfig(models.Model):
     name = models.CharField(max_length=255)
     assignment_description = models.TextField(blank=True)
     points_possible = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
+    additional_instructions = models.TextField(blank=True)
     require_manual_approval = models.BooleanField(default=True)
     workflow_state = models.CharField(
         max_length=20,

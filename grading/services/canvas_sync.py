@@ -369,17 +369,35 @@ def sync_assignment(course_id, assignment_id, download_root):
     return assignment
 
 
+def _build_rubric_for_prompt(assignment):
+    """Return a list of {name, levels} dicts for the assignment rubric, or empty list."""
+    criteria = assignment.rubric_criteria.prefetch_related("levels").all()
+    rubric = []
+    for criterion in criteria:
+        levels = [
+            {"points": str(level.points), "description": level.description}
+            for level in criterion.levels.all()
+        ]
+        if levels:
+            rubric.append({"name": criterion.name, "levels": levels})
+    return rubric
+
+
 def generate_ai_draft(submission):
     provider = OpenAICompatibleProvider()
     submission.ai_status = SubmissionRecord.AIStatus.PROCESSING
     submission.last_error = ""
     submission.save(update_fields=["ai_status", "last_error"])
 
+    rubric = _build_rubric_for_prompt(submission.assignment)
+
     try:
         result = provider.generate_feedback(
             assignment_description=submission.assignment.assignment_description,
             student_name=submission.student_name,
             artifacts=list(submission.artifacts.all()),
+            rubric=rubric or None,
+            extra_instructions=submission.assignment.additional_instructions or None,
         )
     except Exception as exc:  # noqa: BLE001
         submission.ai_status = SubmissionRecord.AIStatus.ERROR

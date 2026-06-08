@@ -446,6 +446,10 @@ def assignment_detail(request, assignment_pk):
 				messages.success(request, "Batch review started.")
 			else:
 				messages.info(request, "A batch review job is already running for this assignment.")
+		elif action == "save_instructions":
+			assignment.additional_instructions = request.POST.get("additional_instructions", "").strip()
+			assignment.save(update_fields=["additional_instructions"])
+			messages.success(request, "Additional instructions saved.")
 		elif action == "save_rubric":
 			try:
 				criteria_data = json.loads(request.POST.get("rubric_json", "[]"))
@@ -496,6 +500,7 @@ def assignment_detail(request, assignment_pk):
 			"submissions": submissions,
 			"latest_batch_job": latest_job,
 			"rubric_data": rubric_data,
+			"additional_instructions": assignment.additional_instructions,
 		},
 	)
 
