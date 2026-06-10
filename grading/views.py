@@ -24,6 +24,7 @@ from grading.services.canvas_sync import (
 	post_submission_to_canvas,
 	sync_assignment as sync_assignment_from_canvas,
 )
+from grading.services.cohort_summary import generate_assignment_cohort_summary
 from grading.services.http_safety import fetch_remote_text, get_max_preview_bytes
 
 
@@ -528,6 +529,14 @@ def assignment_detail(request, assignment_pk):
 				messages.success(request, "Rubric saved.")
 			except (json.JSONDecodeError, ValueError, TypeError) as exc:
 				messages.error(request, f"Failed to save rubric: {exc}")
+		elif action == "generate_cohort_summary":
+			try:
+				generate_assignment_cohort_summary(assignment)
+				messages.success(request, "Cohort summary generated.")
+			except Exception as exc:  # noqa: BLE001
+				assignment.cohort_summary_last_error = str(exc)
+				assignment.save(update_fields=["cohort_summary_last_error"])
+				messages.error(request, f"Failed to generate cohort summary: {exc}")
 
 		return redirect("grading:assignment_detail", assignment_pk=assignment.pk)
 
@@ -553,6 +562,7 @@ def assignment_detail(request, assignment_pk):
 			"latest_batch_job": latest_job,
 			"rubric_data": rubric_data,
 			"additional_instructions": assignment.additional_instructions,
+			"cohort_summary_html": _sanitize_feedback_html(assignment.cohort_summary_html),
 		},
 	)
 
@@ -595,7 +605,8 @@ def submission_detail(request, submission_pk):
 			submission.save(update_fields=["model_adjustments", "model_adjustments_last_used_at"])
 		try:
 			if action == "generate":
-				generate_ai_draft(submission)
+				use_review_pass = request.POST.get("use_review_pass") == "1"
+				generate_ai_draft(submission, use_review_pass=use_review_pass)
 				messages.success(request, "AI draft generated.")
 			elif action == "save":
 				submission.final_feedback = _sanitize_feedback_html(
@@ -656,6 +667,16 @@ def submission_detail(request, submission_pk):
 					"name": _artifact_display_name(artifact),
 				}
 				for artifact in submission.artifacts.all()
+			],
+			"draft_history": [
+				{
+					"created_at": draft.created_at,
+					"provider_name": draft.provider_name,
+					"model_name": draft.model_name,
+					"draft_score": draft.draft_score,
+					"feedback_html": _sanitize_feedback_html(draft.draft_feedback),
+				}
+				for draft in submission.ai_drafts.all().order_by("-created_at")
 			],
 		},
 	)

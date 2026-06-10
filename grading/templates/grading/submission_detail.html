@@ -70,6 +70,11 @@
     .hist-track { background: #efe8db; border: 1px solid #dfd7c8; border-radius: 4px; height: 0.8rem; overflow: hidden; }
     .hist-fill { background: #8a3200; height: 100%; min-width: 2px; }
     .hist-count { font-size: 0.8rem; color: #5a4f41; text-align: right; }
+    .draft-history { margin-bottom: 1rem; }
+    .draft-history details { border: 1px solid #dfd7c8; border-radius: 8px; background: #fff; margin-bottom: 0.6rem; padding: 0.5rem 0.65rem; }
+    .draft-history summary { cursor: pointer; color: #5a4f41; font-size: 0.95rem; }
+    .draft-history-body { margin-top: 0.65rem; line-height: 1.5; }
+    .draft-meta { display: flex; flex-wrap: wrap; gap: 0.4rem; margin-top: 0.35rem; }
     @media (max-width: 1100px) {
       .workspace { grid-template-columns: 1fr; }
       .workspace-editor-column { position: static; top: auto; }
@@ -137,6 +142,26 @@
           </div>
         {% endfor %}
       </div>
+    </div>
+  {% endif %}
+
+  {% if draft_history %}
+    <div class="panel draft-history">
+      <h2>Previous Drafts</h2>
+      <p class="muted">Review earlier generated drafts for this student.</p>
+      {% for draft in draft_history %}
+        <details {% if forloop.first %}open{% endif %}>
+          <summary>
+            Draft {{ forloop.counter }} · {{ draft.created_at|date:"Y-m-d H:i" }}
+          </summary>
+          <div class="draft-meta">
+            <span class="meta-chip">Provider: {{ draft.provider_name }}</span>
+            <span class="meta-chip">Model: {{ draft.model_name }}</span>
+            {% if draft.draft_score is not None %}<span class="meta-chip">Score: {{ draft.draft_score }}</span>{% endif %}
+          </div>
+          <div class="draft-history-body">{{ draft.feedback_html|safe }}</div>
+        </details>
+      {% endfor %}
     </div>
   {% endif %}
 
@@ -209,6 +234,7 @@
           </div>
           <p class="inline-actions review-actions">
             <label class="score-control">Score <input type="text" name="final_score" value="{{ submission.final_score|default:submission.proposed_score|default:'' }}"></label>
+            <label class="score-control"><input type="checkbox" name="use_review_pass" value="1"> Use second-pass refinement on regenerate</label>
             <button type="submit" name="action" value="save">Save Review</button>
             <button type="submit" name="action" value="post">Post to Canvas</button>
             <button type="submit" name="action" value="generate">Regenerate Draft</button>
