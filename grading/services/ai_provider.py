@@ -45,6 +45,17 @@ class OpenAICompatibleProvider:
         return "\n".join(lines) if lines else "- No downloaded artifacts available"
 
     @staticmethod
+    def _positive_int_env(name, default):
+        raw = os.getenv(name)
+        if not raw:
+            return default
+        try:
+            parsed = int(raw)
+        except ValueError:
+            return default
+        return parsed if parsed > 0 else default
+
+    @staticmethod
     def _notebook_text_sample(content, max_chars_per_file):
         try:
             payload = json.loads(content)
@@ -79,10 +90,16 @@ class OpenAICompatibleProvider:
         notebook_text = "\n\n".join(parts)
         return notebook_text[:max_chars_per_file]
 
-    def _read_text_samples(self, artifacts, max_files=3, max_chars_per_file=3000):
+    def _read_text_samples(self, artifacts, max_files=5, max_chars_per_file=None, max_total_chars=None):
+        if max_chars_per_file is None:
+            max_chars_per_file = self._positive_int_env("FEEDBACK_MAX_PROMPT_FILE_CHARS", 12000)
+        if max_total_chars is None:
+            max_total_chars = self._positive_int_env("FEEDBACK_MAX_PROMPT_TOTAL_CHARS", 24000)
+
         samples = []
+        total_chars = 0
         for artifact in artifacts:
-            if len(samples) >= max_files:
+            if len(samples) >= max_files or total_chars >= max_total_chars:
                 break
             if not artifact.local_path:
                 continue
@@ -118,12 +135,20 @@ class OpenAICompatibleProvider:
             if extracted is None and not is_text_suffix:
                 continue
 
-            sample_text = extracted if extracted is not None else content[:max_chars_per_file]
+            remaining_chars = max_total_chars - total_chars
+            if remaining_chars <= 0:
+                break
 
-            samples.append(
+            file_char_budget = min(max_chars_per_file, remaining_chars)
+            sample_text = extracted if extracted is not None else content
+            sample_text = sample_text[:file_char_budget]
+
+            block = (
                 f"\n### File: {path.name}\n"
                 f"{sample_text}\n"
             )
+            samples.append(block)
+            total_chars += len(block)
 
         return "\n".join(samples) if samples else "No text samples could be extracted."
 

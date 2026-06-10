@@ -1,6 +1,7 @@
 import json
 from pathlib import Path
 import re
+from statistics import mean, median, pstdev
 from urllib.parse import urlparse
 
 import bleach
@@ -383,6 +384,66 @@ def _build_submission_preview(submission):
 	return _build_notebook_preview(submission) or _build_python_preview(submission)
 
 
+def _proposed_score_distribution(submissions, bin_count=10):
+	scores = []
+	for item in submissions:
+		if item.proposed_score is None:
+			continue
+		try:
+			scores.append(float(item.proposed_score))
+		except (TypeError, ValueError):
+			continue
+
+	if not scores:
+		return None
+
+	sorted_scores = sorted(scores)
+	min_score = sorted_scores[0]
+	max_score = sorted_scores[-1]
+	count = len(sorted_scores)
+	avg = mean(sorted_scores)
+	med = median(sorted_scores)
+	std = pstdev(sorted_scores) if count > 1 else 0.0
+
+	if min_score == max_score:
+		bins = [
+			{
+				"label": f"{min_score:.2f}",
+				"count": count,
+			}
+		]
+		max_bin_count = count
+	else:
+		width = (max_score - min_score) / bin_count
+		bins = []
+		max_bin_count = 0
+		for idx in range(bin_count):
+			start = min_score + idx * width
+			end = min_score + (idx + 1) * width if idx < bin_count - 1 else max_score
+			if idx < bin_count - 1:
+				bin_total = sum(1 for value in sorted_scores if start <= value < end)
+			else:
+				bin_total = sum(1 for value in sorted_scores if start <= value <= end)
+			max_bin_count = max(max_bin_count, bin_total)
+			bins.append(
+				{
+					"label": f"{start:.1f}-{end:.1f}",
+					"count": bin_total,
+				}
+			)
+
+	return {
+		"count": count,
+		"min": min_score,
+		"max": max_score,
+		"mean": avg,
+		"median": med,
+		"std_dev": std,
+		"bins": bins,
+		"max_bin_count": max_bin_count,
+	}
+
+
 def gradebook(request):
 	assignments = AssignmentConfig.objects.select_related("course").prefetch_related("submissions")
 	return render(request, "grading/gradebook.html", {"assignments": assignments})
@@ -527,6 +588,11 @@ def submission_detail(request, submission_pk):
 
 	if request.method == "POST":
 		action = request.POST.get("action")
+		model_adjustments = request.POST.get("model_adjustments", "").strip()
+		if model_adjustments != (submission.model_adjustments or ""):
+			submission.model_adjustments = model_adjustments
+			submission.model_adjustments_last_used_at = None
+			submission.save(update_fields=["model_adjustments", "model_adjustments_last_used_at"])
 		try:
 			if action == "generate":
 				generate_ai_draft(submission)
@@ -579,6 +645,7 @@ def submission_detail(request, submission_pk):
 			"editor_feedback_html": _sanitize_feedback_html(
 				submission.final_feedback or submission.proposed_feedback
 			),
+			"proposed_score_distribution": _proposed_score_distribution(ordered_submissions),
 			"ordered_submissions": ordered_submissions,
 			"previous_submission_pk": previous_submission_pk,
 			"next_submission_pk": next_submission_pk,
