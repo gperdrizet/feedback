@@ -10,7 +10,7 @@ from django.test import TestCase
 from django.urls import reverse
 from django.utils import timezone
 
-from grading.models import AssignmentConfig, BatchReviewJob, CourseSync, SubmissionArtifact, SubmissionRecord
+from grading.models import AIFeedbackDraft, AssignmentConfig, BatchReviewJob, CourseSync, SubmissionArtifact, SubmissionRecord
 from grading.services.ai_provider import OpenAICompatibleProvider
 from grading.services.canvas_sync import post_submission_to_canvas
 
@@ -86,6 +86,34 @@ class ReviewWorkflowTests(TestCase):
 		self.assertEqual(payload["job"]["status"], BatchReviewJob.Status.RUNNING)
 		self.assertEqual(payload["job"]["current_student_name"], "Bob")
 		self.assertEqual(len(payload["submissions"]), 3)
+
+	@patch("grading.views.generate_assignment_cohort_summary")
+	def test_assignment_cohort_summary_generation_saves_rendered_summary(self, mock_generate_summary):
+		self.assignment.cohort_summary_html = "<p>Cohort quality is strong overall.</p>"
+		self.assignment.save(update_fields=["cohort_summary_html"])
+
+		response = self.client.post(
+			reverse("grading:assignment_detail", args=[self.assignment.pk]),
+			{"action": "generate_cohort_summary"},
+		)
+
+		self.assertEqual(response.status_code, 302)
+		mock_generate_summary.assert_called_once()
+		follow = self.client.get(reverse("grading:assignment_detail", args=[self.assignment.pk]))
+		self.assertContains(follow, "Cohort Summary")
+		self.assertContains(follow, "Cohort quality is strong overall")
+
+	@patch("grading.views.generate_assignment_cohort_summary", side_effect=ValueError("No generated feedback exists yet."))
+	def test_assignment_cohort_summary_generation_failure_is_reported(self, mock_generate_summary):
+		response = self.client.post(
+			reverse("grading:assignment_detail", args=[self.assignment.pk]),
+			{"action": "generate_cohort_summary"},
+		)
+
+		self.assertEqual(response.status_code, 302)
+		mock_generate_summary.assert_called_once()
+		self.assignment.refresh_from_db()
+		self.assertIn("No generated feedback exists yet", self.assignment.cohort_summary_last_error)
 
 	def test_assignment_views_use_latest_submission_per_student(self):
 		SubmissionRecord.objects.create(
@@ -174,6 +202,20 @@ class ReviewWorkflowTests(TestCase):
 			self.first_submission.model_adjustments,
 			"Please be stricter on statistical interpretation and cite exact lines.",
 		)
+		mock_generate.assert_called_with(self.first_submission, use_review_pass=False)
+
+	@patch("grading.views.generate_ai_draft")
+	def test_submission_generate_can_enable_second_pass(self, mock_generate):
+		response = self.client.post(
+			reverse("grading:submission_detail", args=[self.first_submission.pk]),
+			{
+				"action": "generate",
+				"use_review_pass": "1",
+			},
+		)
+
+		self.assertEqual(response.status_code, 302)
+		mock_generate.assert_called_once_with(self.first_submission, use_review_pass=True)
 
 	@patch("grading.services.canvas_sync.post_submission_grade")
 	def test_post_to_canvas_sends_html_comment(self, mock_post_grade):
@@ -286,6 +328,30 @@ class ReviewWorkflowTests(TestCase):
 		self.assertContains(response, "Python cell")
 		self.assertContains(response, "greet")
 		self.assertContains(response, "highlight")
+
+	def test_submission_review_displays_previous_drafts(self):
+		AIFeedbackDraft.objects.create(
+			submission=self.first_submission,
+			provider_name="provider-a",
+			model_name="model-a",
+			draft_feedback="<p>First draft body</p>",
+			draft_score=Decimal("85.00"),
+		)
+		AIFeedbackDraft.objects.create(
+			submission=self.first_submission,
+			provider_name="provider-b",
+			model_name="model-b",
+			draft_feedback="<p>Second draft body</p>",
+			draft_score=Decimal("88.00"),
+		)
+
+		response = self.client.get(reverse("grading:submission_detail", args=[self.first_submission.pk]))
+
+		self.assertContains(response, "Previous Drafts")
+		self.assertContains(response, "First draft body")
+		self.assertContains(response, "Second draft body")
+		self.assertContains(response, "Provider: provider-a")
+		self.assertContains(response, "Provider: provider-b")
 
 	def test_ai_provider_extracts_notebook_cells_for_prompt(self):
 		notebook_path = self._write_notebook(

@@ -390,7 +390,7 @@ def _merge_prompt_instructions(assignment_instructions, submission_adjustments):
     return "\n\n".join(parts) if parts else None
 
 
-def generate_ai_draft(submission):
+def generate_ai_draft(submission, use_review_pass=False):
     provider = OpenAICompatibleProvider()
     submission.ai_status = SubmissionRecord.AIStatus.PROCESSING
     submission.last_error = ""
@@ -408,6 +408,7 @@ def generate_ai_draft(submission):
                 submission.assignment.additional_instructions,
                 submission.model_adjustments,
             ),
+            enable_review_pass=use_review_pass,
         )
     except Exception as exc:  # noqa: BLE001
         submission.ai_status = SubmissionRecord.AIStatus.ERROR

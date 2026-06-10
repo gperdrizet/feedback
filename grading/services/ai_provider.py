@@ -219,6 +219,134 @@ class OpenAICompatibleProvider:
             f"{file_samples}\n"
         )
 
+    def _format_cohort_feedback_block(self, feedback_entries, max_entries=80, max_chars_each=1200):
+        if not feedback_entries:
+            return "No student feedback entries are available."
+
+        lines = []
+        for idx, entry in enumerate(feedback_entries[:max_entries], start=1):
+            feedback = (entry.get("feedback") or "").strip()
+            if not feedback:
+                continue
+            score = entry.get("score")
+            score_text = str(score) if score is not None else "n/a"
+            student = entry.get("student_name") or f"Student {idx}"
+            status = entry.get("review_status") or "unknown"
+            snippet = feedback[:max_chars_each]
+            lines.append(
+                f"Student: {student}\n"
+                f"Review status: {status}\n"
+                f"Score: {score_text}\n"
+                f"Feedback:\n{snippet}\n"
+            )
+
+        return "\n---\n".join(lines) if lines else "No student feedback entries are available."
+
+    def generate_cohort_summary(self, assignment_name, assignment_description, extra_instructions, feedback_entries):
+        cohort_block = self._format_cohort_feedback_block(feedback_entries)
+        guidance_block = extra_instructions.strip() if extra_instructions else ""
+
+        analysis_prompt = (
+            "You are analyzing cohort-level student feedback outcomes for an instructor. "
+            "Based on the assignment context and per-student feedback, extract themes and patterns. "
+            "Return plain text with concise bullets under these headings exactly: "
+            "Observed Strength Patterns, Recurring Mistakes, Frequent Concept Gaps, "
+            "Submission Quality Distribution, and Instructor Follow-up Priorities.\n\n"
+            f"Assignment: {assignment_name}\n\n"
+            "Assignment description:\n"
+            f"{assignment_description[:10000]}\n\n"
+            f"Additional instructor instructions:\n{guidance_block or 'None'}\n\n"
+            "Per-student generated feedback entries:\n"
+            f"{cohort_block}\n"
+        )
+
+        analysis_response = self.client.chat.completions.create(
+            model=self.model_name,
+            temperature=self.temperature,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a careful instructional analyst.",
+                },
+                {
+                    "role": "user",
+                    "content": analysis_prompt,
+                },
+            ],
+        )
+        analysis_text = self._extract_content(analysis_response)
+        if not analysis_text:
+            raise ValueError("Cohort analysis pass returned no content.")
+
+        synthesis_prompt = (
+            "Create an instructor-facing cohort summary from the analysis below. "
+            "Output valid HTML only using: <p>, <strong>, <em>, <ul>, <ol>, <li>, <table>, <thead>, <tbody>, <tr>, <th>, <td>. "
+            "Use these sections in order: Cohort Snapshot, Common Strengths, Common Mistakes, "
+            "Frequent Issues Requiring Intervention, and Overall Submission Quality Assessment. "
+            "Where possible, include approximate counts or percentages derived from the evidence. "
+            "Keep it practical and concise for instructor decision-making.\n\n"
+            f"Assignment: {assignment_name}\n\n"
+            "Analysis to synthesize:\n"
+            f"{analysis_text}\n"
+        )
+
+        synthesis_response = self.client.chat.completions.create(
+            model=self.model_name,
+            temperature=self.temperature,
+            messages=[
+                {
+                    "role": "system",
+                    "content": "You are a strict but helpful instructional assistant producing clean HTML summaries.",
+                },
+                {
+                    "role": "user",
+                    "content": synthesis_prompt,
+                },
+            ],
+        )
+        summary_html = self._extract_content(synthesis_response)
+        if not summary_html:
+            raise ValueError("Cohort synthesis pass returned no content.")
+        return summary_html
+
+    def _build_review_prompt(
+        self,
+        assignment_description,
+        student_name,
+        artifacts,
+        draft_feedback,
+        rubric=None,
+        extra_instructions=None,
+    ):
+        artifact_summary = self._artifact_summary(artifacts)
+        file_samples = self._read_text_samples(artifacts)
+        rubric_block = self._build_rubric_block(rubric)
+        rubric_section = f"\n{rubric_block}\n" if rubric_block else ""
+        extra_section = (
+            f"\nAdditional instructor guidance for this assignment:\n{extra_instructions.strip()}\n"
+            if extra_instructions and extra_instructions.strip()
+            else ""
+        )
+
+        return (
+            "You are reviewing and improving an AI-generated draft for an instructor. "
+            "Revise the draft so it is specific, evidence-based, and aligned to the assignment and rubric. "
+            "Keep the same overall structure, but improve clarity, accuracy, and actionability. "
+            "Do not invent code behavior not supported by the submission samples. "
+            "Output valid HTML only using simple tags.\n\n"
+            f"Student: {student_name}\n\n"
+            "Assignment description from Canvas:\n"
+            f"{assignment_description[:8000]}\n"
+            f"{rubric_section}"
+            f"{extra_section}\n"
+            "Artifacts available:\n"
+            f"{artifact_summary}\n\n"
+            "Extracted text samples from submitted files:\n"
+            f"{file_samples}\n\n"
+            "Current draft feedback to revise:\n"
+            f"{draft_feedback}\n"
+        )
+
     @staticmethod
     def _extract_content(response):
         if not response.choices:
@@ -237,7 +365,15 @@ class OpenAICompatibleProvider:
             return "\n".join(parts).strip()
         return ""
 
-    def generate_feedback(self, assignment_description, student_name, artifacts, rubric=None, extra_instructions=None):
+    def generate_feedback(
+        self,
+        assignment_description,
+        student_name,
+        artifacts,
+        rubric=None,
+        extra_instructions=None,
+        enable_review_pass=False,
+    ):
         prompt = self._build_prompt(
             assignment_description=assignment_description,
             student_name=student_name,
@@ -267,6 +403,36 @@ class OpenAICompatibleProvider:
         feedback = self._extract_content(response)
         if not feedback:
             raise ValueError("AI response did not contain message content.")
+
+        if enable_review_pass:
+            review_prompt = self._build_review_prompt(
+                assignment_description=assignment_description,
+                student_name=student_name,
+                artifacts=artifacts,
+                draft_feedback=feedback,
+                rubric=rubric,
+                extra_instructions=extra_instructions,
+            )
+            review_response = self.client.chat.completions.create(
+                model=self.model_name,
+                temperature=self.temperature,
+                messages=[
+                    {
+                        "role": "system",
+                        "content": (
+                            "You are a strict but constructive instructor assistant. "
+                            "Revise for quality and output valid HTML only using simple formatting tags."
+                        ),
+                    },
+                    {
+                        "role": "user",
+                        "content": review_prompt,
+                    },
+                ],
+            )
+            reviewed_feedback = self._extract_content(review_response)
+            if reviewed_feedback:
+                feedback = reviewed_feedback
 
         return AIDraftResult(
             feedback=feedback,

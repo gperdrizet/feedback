@@ -24,6 +24,9 @@ class AssignmentConfig(models.Model):
     assignment_description = models.TextField(blank=True)
     points_possible = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
     additional_instructions = models.TextField(blank=True)
+    cohort_summary_html = models.TextField(blank=True)
+    cohort_summary_generated_at = models.DateTimeField(null=True, blank=True)
+    cohort_summary_last_error = models.TextField(blank=True)
     require_manual_approval = models.BooleanField(default=True)
     workflow_state = models.CharField(
         max_length=20,

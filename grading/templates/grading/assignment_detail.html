@@ -19,6 +19,9 @@
     .job-status.error { color: #a22424; }
     .table-note { margin: 1rem 0 0.35rem; }
     .table-note .stat-chip { background: #fff7eb; border-color: #e3c9ac; color: #6f2c00; }
+    .cohort-summary-body { margin-top: 0.75rem; line-height: 1.55; }
+    .cohort-summary-meta { margin-top: 0.5rem; color: #665; font-size: 0.92rem; }
+    .cohort-summary-error { color: #a22424; margin-top: 0.5rem; }
     /* Rubric editor */
     .rubric-table { border: 1px solid #dfd7c8; border-radius: 6px; overflow: hidden; margin: 0.75rem 0 1rem; }
     .rubric-table-header { display: grid; grid-template-columns: 1fr 2fr; background: #f0ece4; border-bottom: 2px solid #dfd7c8; }
@@ -79,6 +82,27 @@
       <div id="batch-summary" class="job-status"></div>
       <div id="batch-last-error" class="job-status error"></div>
     </div>
+  </div>
+
+  <div class="panel">
+    <h2>Cohort Summary</h2>
+    <p>Generate a high-level analysis of common strengths, recurring mistakes, and overall submission quality using assignment context and all student feedback drafts.</p>
+    <form method="post" class="actions">
+      {% csrf_token %}
+      <input type="hidden" name="action" value="generate_cohort_summary">
+      <button type="submit" class="button">Generate Cohort Summary</button>
+    </form>
+    {% if assignment.cohort_summary_generated_at %}
+      <div class="cohort-summary-meta">Last generated: {{ assignment.cohort_summary_generated_at|date:"Y-m-d H:i" }}</div>
+    {% endif %}
+    {% if assignment.cohort_summary_last_error %}
+      <div class="cohort-summary-error">Last error: {{ assignment.cohort_summary_last_error }}</div>
+    {% endif %}
+    {% if cohort_summary_html %}
+      <div class="cohort-summary-body">{{ cohort_summary_html|safe }}</div>
+    {% else %}
+      <p class="muted">No cohort summary yet.</p>
+    {% endif %}
   </div>
 
   {{ rubric_data|json_script:"rubric-initial-data" }}
