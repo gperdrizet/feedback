@@ -9,6 +9,7 @@ import requests
 from canvasapi import Canvas
 from dotenv import load_dotenv
 from django.utils import timezone
+from grading.services.http_safety import download_remote_file
 
 
 def _coerce_canvas_datetime(value):
@@ -206,10 +207,7 @@ def get_assignment_description(course_id, assignment_id):
 
 
 def _download_file(url, destination_path):
-    response = requests.get(url, timeout=30)
-    response.raise_for_status()
-    with open(destination_path, "wb") as f:
-        f.write(response.content)
+    download_remote_file(url, destination_path)
 
 
 def _safe_filename(name):

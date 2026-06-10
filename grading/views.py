@@ -1,15 +1,13 @@
-import base64
 import json
-import threading
 from pathlib import Path
+import re
 from urllib.parse import urlparse
 
+import bleach
 import markdown as markdown_lib
-import requests
 from django.contrib import messages
-from django.db import close_old_connections
+from django.utils.html import escape
 from django.http import JsonResponse
-from django.utils import timezone
 from django.utils.safestring import mark_safe
 from django.shortcuts import get_object_or_404, redirect, render
 from pygments import highlight
@@ -18,12 +16,76 @@ from pygments.lexers import get_lexer_by_name, guess_lexer, TextLexer
 from pygments.util import ClassNotFound
 
 from grading.models import AssignmentConfig, BatchReviewJob, RubricCriterion, RubricLevel, SubmissionRecord
+from grading.services.batch_jobs import enqueue_batch_review_job
 from grading.services.canvas_sync import (
 	approve_submission,
 	generate_ai_draft,
 	post_submission_to_canvas,
 	sync_assignment as sync_assignment_from_canvas,
 )
+from grading.services.http_safety import fetch_remote_text, get_max_preview_bytes
+
+
+_ALLOWED_HTML_TAGS = [
+	"a",
+	"abbr",
+	"acronym",
+	"b",
+	"blockquote",
+	"br",
+	"code",
+	"em",
+	"i",
+	"li",
+	"ol",
+	"p",
+	"pre",
+	"strong",
+	"u",
+	"ul",
+	"table",
+	"thead",
+	"tbody",
+	"tr",
+	"th",
+	"td",
+	"h1",
+	"h2",
+	"h3",
+	"h4",
+	"h5",
+	"h6",
+	"hr",
+	"img",
+	"span",
+	"div",
+]
+
+_ALLOWED_HTML_ATTRIBUTES = {
+	"a": ["href", "title", "rel", "target"],
+	"img": ["src", "alt", "title"],
+	"th": ["colspan", "rowspan"],
+	"td": ["colspan", "rowspan"],
+	"*": ["class"],
+}
+
+_ALLOWED_HTML_PROTOCOLS = ["http", "https", "mailto", "data"]
+_BASE64_RE = re.compile(r"^[A-Za-z0-9+/=\s]+$")
+
+
+def _sanitize_html_fragment(value):
+	cleaned = bleach.clean(
+		value or "",
+		tags=_ALLOWED_HTML_TAGS,
+		attributes=_ALLOWED_HTML_ATTRIBUTES,
+		protocols=_ALLOWED_HTML_PROTOCOLS,
+		strip=True,
+	)
+	return bleach.linkify(cleaned)
+
+
+def _sanitize_feedback_html(value):
+	return _sanitize_html_fragment(value)
 
 
 def _ordered_assignment_submissions(assignment):
@@ -83,86 +145,8 @@ def _serialize_batch_job(job):
 	}
 
 
-def _run_batch_review_job(job_pk):
-	close_old_connections()
-	try:
-		job = BatchReviewJob.objects.select_related("assignment", "assignment__course").get(pk=job_pk)
-		job.status = BatchReviewJob.Status.RUNNING
-		job.started_at = timezone.now()
-		job.finished_at = None
-		job.summary_message = ""
-		job.last_error = ""
-		job.current_student_name = ""
-		job.total_submissions = 0
-		job.completed_submissions = 0
-		job.failed_submissions = 0
-		job.save(
-			update_fields=[
-				"status",
-				"started_at",
-				"finished_at",
-				"summary_message",
-				"last_error",
-				"current_student_name",
-				"total_submissions",
-				"completed_submissions",
-				"failed_submissions",
-			],
-		)
-
-		sync_assignment_from_canvas(
-			course_id=job.assignment.course.canvas_course_id,
-			assignment_id=job.assignment.canvas_assignment_id,
-			download_root="submissions",
-		)
-
-		assignment = AssignmentConfig.objects.select_related("course").get(pk=job.assignment.pk)
-		submissions = list(_ordered_assignment_submissions(assignment))
-		job.total_submissions = len(submissions)
-		job.save(update_fields=["total_submissions"])
-
-		for submission in submissions:
-			job.current_student_name = submission.student_name
-			job.save(update_fields=["current_student_name"])
-			try:
-				generate_ai_draft(submission)
-				job.completed_submissions += 1
-			except Exception as exc:  # noqa: BLE001
-				job.failed_submissions += 1
-				job.last_error = f"{submission.student_name}: {exc}"
-			finally:
-				job.save(update_fields=["completed_submissions", "failed_submissions", "last_error"])
-
-		job.status = BatchReviewJob.Status.COMPLETED
-		job.finished_at = timezone.now()
-		job.current_student_name = ""
-		job.summary_message = (
-			f"Generated drafts for {job.completed_submissions} of {job.total_submissions} submissions."
-			+ (f" {job.failed_submissions} failed." if job.failed_submissions else "")
-		)
-		job.save(update_fields=["status", "finished_at", "current_student_name", "summary_message"])
-	except Exception as exc:  # noqa: BLE001
-		BatchReviewJob.objects.filter(pk=job_pk).update(
-			status=BatchReviewJob.Status.FAILED,
-			finished_at=timezone.now(),
-			current_student_name="",
-			last_error=str(exc),
-			summary_message="Batch review failed.",
-		)
-	finally:
-		close_old_connections()
-
-
 def _start_batch_review_job(assignment):
-	running_job = assignment.batch_jobs.filter(
-		status__in=[BatchReviewJob.Status.QUEUED, BatchReviewJob.Status.RUNNING]
-	).order_by("-created_at").first()
-	if running_job:
-		return running_job, False
-
-	job = BatchReviewJob.objects.create(assignment=assignment, status=BatchReviewJob.Status.QUEUED)
-	threading.Thread(target=_run_batch_review_job, args=(job.pk,), daemon=True).start()
-	return job, True
+	return enqueue_batch_review_job(assignment)
 
 
 def _neighboring_submission_ids(submissions, current_submission_id):
@@ -233,7 +217,8 @@ def _coerce_cell_source(source):
 def _render_markdown_cell(text):
 	if not text.strip():
 		return mark_safe("<p><em>Empty markdown cell</em></p>")
-	return mark_safe(markdown_lib.markdown(text, extensions=["fenced_code", "tables", "nl2br"]))
+	rendered = markdown_lib.markdown(text, extensions=["fenced_code", "tables", "nl2br"])
+	return mark_safe(_sanitize_html_fragment(rendered))
 
 
 def _render_code_cell(text, language=None):
@@ -254,25 +239,35 @@ def _render_cell_outputs(outputs):
 			png = data.get("image/png") or output.get("image/png")
 			if png:
 				raw = png if isinstance(png, str) else "".join(png)
-				parts.append(f'<img src="data:image/png;base64,{raw.strip()}" style="max-width:100%;">')
+				raw = raw.strip()
+				if _BASE64_RE.match(raw):
+					compact = re.sub(r"\s+", "", raw)
+					parts.append(f'<img src="data:image/png;base64,{compact}" alt="Notebook output image">')
 				continue
 			# HTML output
 			html_out = data.get("text/html")
 			if html_out:
 				text = html_out if isinstance(html_out, str) else "".join(html_out)
-				parts.append(f'<div class="nb-output-html">{text}</div>')
+				parts.append(f'<div class="nb-output-html">{_sanitize_html_fragment(text)}</div>')
 				continue
 			# Plain text / stdout
 			text_out = data.get("text/plain") or output.get("text")
 			if text_out:
 				text = text_out if isinstance(text_out, str) else "".join(text_out)
-				parts.append(f'<pre class="nb-output">{text}</pre>')
+				parts.append(f'<pre class="nb-output">{escape(text)}</pre>')
 				continue
 		elif output_type == "error":
 			traceback_lines = output.get("traceback", [output.get("evalue", "")])
 			raw = "\n".join(traceback_lines) if isinstance(traceback_lines, list) else traceback_lines
-			parts.append(f'<pre class="nb-output nb-output-error">{raw}</pre>')
+			parts.append(f'<pre class="nb-output nb-output-error">{escape(raw)}</pre>')
 	return mark_safe("\n".join(parts)) if parts else None
+
+
+def _read_local_text_with_limit(path):
+	max_bytes = get_max_preview_bytes()
+	if path.stat().st_size > max_bytes:
+		raise ValueError(f"Preview file exceeds limit of {max_bytes} bytes")
+	return path.read_text(encoding="utf-8", errors="ignore")
 
 
 def _load_notebook_payload(source_kind, source_value):
@@ -280,11 +275,9 @@ def _load_notebook_payload(source_kind, source_value):
 		path = Path(source_value)
 		if not path.exists() or path.is_dir():
 			return None
-		return json.loads(path.read_text(encoding="utf-8"))
+		return json.loads(_read_local_text_with_limit(path))
 
-	response = requests.get(source_value, timeout=30)
-	response.raise_for_status()
-	return response.json()
+	return json.loads(fetch_remote_text(source_value, max_bytes=get_max_preview_bytes()))
 
 
 def _load_text_payload(source_kind, source_value):
@@ -292,11 +285,9 @@ def _load_text_payload(source_kind, source_value):
 		path = Path(source_value)
 		if not path.exists() or path.is_dir():
 			return None
-		return path.read_text(encoding="utf-8", errors="ignore")
+		return _read_local_text_with_limit(path)
 
-	response = requests.get(source_value, timeout=30)
-	response.raise_for_status()
-	return response.text
+	return fetch_remote_text(source_value, max_bytes=get_max_preview_bytes())
 
 
 def _build_notebook_preview(submission, max_cells=60):
@@ -306,7 +297,7 @@ def _build_notebook_preview(submission, max_cells=60):
 
 		try:
 			payload = _load_notebook_payload(source_kind, source_value)
-		except (OSError, ValueError, json.JSONDecodeError, requests.RequestException):
+		except (OSError, ValueError, json.JSONDecodeError):
 			continue
 
 		if not isinstance(payload, dict):
@@ -362,7 +353,7 @@ def _build_python_preview(submission):
 
 		try:
 			code = _load_text_payload(source_kind, source_value)
-		except (OSError, requests.RequestException):
+		except (OSError, ValueError):
 			continue
 
 		if code is None:
@@ -541,13 +532,17 @@ def submission_detail(request, submission_pk):
 				generate_ai_draft(submission)
 				messages.success(request, "AI draft generated.")
 			elif action == "save":
-				submission.final_feedback = request.POST.get("final_feedback", submission.final_feedback)
+				submission.final_feedback = _sanitize_feedback_html(
+					request.POST.get("final_feedback", submission.final_feedback)
+				)
 				final_score_raw = request.POST.get("final_score", "").strip()
 				submission.final_score = final_score_raw or submission.final_score or submission.proposed_score
 				submission.save(update_fields=["final_feedback", "final_score"])
 				messages.success(request, "Review saved.")
 			elif action == "approve":
-				submission.final_feedback = request.POST.get("final_feedback", submission.proposed_feedback)
+				submission.final_feedback = _sanitize_feedback_html(
+					request.POST.get("final_feedback", submission.proposed_feedback)
+				)
 				final_score_raw = request.POST.get("final_score", "").strip()
 				submission.final_score = final_score_raw or submission.proposed_score
 				submission.save(update_fields=["final_feedback", "final_score"])
@@ -558,7 +553,9 @@ def submission_detail(request, submission_pk):
 				)
 				messages.success(request, "Submission approved and queued for posting.")
 			elif action == "post":
-				submission.final_feedback = request.POST.get("final_feedback", submission.final_feedback or submission.proposed_feedback)
+				submission.final_feedback = _sanitize_feedback_html(
+					request.POST.get("final_feedback", submission.final_feedback or submission.proposed_feedback)
+				)
 				final_score_raw = request.POST.get("final_score", "").strip()
 				submission.final_score = final_score_raw or submission.final_score or submission.proposed_score
 				submission.save(update_fields=["final_feedback", "final_score"])
@@ -579,6 +576,9 @@ def submission_detail(request, submission_pk):
 		"grading/submission_detail.html",
 		{
 			"submission": submission,
+			"editor_feedback_html": _sanitize_feedback_html(
+				submission.final_feedback or submission.proposed_feedback
+			),
 			"ordered_submissions": ordered_submissions,
 			"previous_submission_pk": previous_submission_pk,
 			"next_submission_pk": next_submission_pk,

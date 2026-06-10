@@ -8,3 +8,4 @@ canvasapi>=3.0.0
 requests>=2.31.0
 Markdown>=3.7
 Pygments>=2.18
+bleach>=6.2.0

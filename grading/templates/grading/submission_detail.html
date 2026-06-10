@@ -155,7 +155,7 @@
                    class="rich-editor-body"
                    contenteditable="true"
                    spellcheck="true"
-                   data-placeholder="No feedback yet. Generate a draft or type here.">{{ submission.final_feedback|default:submission.proposed_feedback|safe }}</div>
+                    data-placeholder="No feedback yet. Generate a draft or type here.">{{ editor_feedback_html|safe }}</div>
             </div>
             <input type="hidden" name="final_feedback" id="final-feedback-hidden">
           </div>

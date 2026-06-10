@@ -56,8 +56,7 @@ class ReviewWorkflowTests(TestCase):
 		path.write_text(json.dumps({"cells": cells}), encoding="utf-8")
 		return path
 
-	@patch("grading.views.threading.Thread.start")
-	def test_assignment_batch_review_starts_async_job(self, mock_thread_start):
+	def test_assignment_batch_review_starts_async_job(self):
 		response = self.client.post(
 			reverse("grading:assignment_detail", args=[self.assignment.pk]),
 			{"action": "batch_review"},
@@ -68,7 +67,6 @@ class ReviewWorkflowTests(TestCase):
 		self.assertEqual(BatchReviewJob.objects.filter(assignment=self.assignment).count(), 1)
 		job = BatchReviewJob.objects.get(assignment=self.assignment)
 		self.assertEqual(job.status, BatchReviewJob.Status.QUEUED)
-		mock_thread_start.assert_called_once()
 
 	def test_assignment_batch_status_endpoint_returns_job_and_rows(self):
 		job = BatchReviewJob.objects.create(
@@ -222,16 +220,13 @@ class ReviewWorkflowTests(TestCase):
 		self.assertContains(response, "print")
 		self.assertContains(response, "highlight")
 
-	@patch("grading.views.requests.get")
-	def test_submission_review_renders_linked_notebook(self, mock_get):
-		mock_response = Mock()
-		mock_response.raise_for_status.return_value = None
-		mock_response.json.return_value = {
+	@patch("grading.views.fetch_remote_text")
+	def test_submission_review_renders_linked_notebook(self, mock_fetch):
+		mock_fetch.return_value = json.dumps({
 			"cells": [
 				{"cell_type": "markdown", "metadata": {}, "source": ["Linked notebook\n"]},
 			]
-		}
-		mock_get.return_value = mock_response
+		})
 
 		linked_submission = SubmissionRecord.objects.create(
 			assignment=self.assignment,
@@ -247,7 +242,7 @@ class ReviewWorkflowTests(TestCase):
 
 		self.assertContains(response, "Submission")
 		self.assertContains(response, "Linked notebook")
-		mock_get.assert_called_once_with("https://example.com/student-notebook.ipynb", timeout=30)
+		mock_fetch.assert_called_once()
 
 	def test_submission_review_renders_local_python_artifact(self):
 		script_path = Path(self.tempdir.name) / "main.py"
