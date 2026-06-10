@@ -88,6 +88,11 @@ jobs:
           script: |
             set -eu
 
+            # Use a temporary Docker config so registry creds are not persisted in ~/.docker/config.json.
+            DOCKER_CONFIG_DIR="$(mktemp -d)"
+            trap 'rm -rf "$DOCKER_CONFIG_DIR"' EXIT
+            export DOCKER_CONFIG="$DOCKER_CONFIG_DIR"
+
             cat > /opt/feedback/.env <<EOF
             FEEDBACK_IMAGE=${FEEDBACK_IMAGE}
             FEEDBACK_SECRET_KEY=${FEEDBACK_SECRET_KEY}
