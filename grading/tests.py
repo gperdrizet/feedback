@@ -157,6 +157,24 @@ class ReviewWorkflowTests(TestCase):
 		self.assertEqual(self.first_submission.final_score, Decimal("87"))
 		self.assertEqual(self.first_submission.final_feedback, "Ready to post.")
 
+	@patch("grading.views.generate_ai_draft")
+	def test_submission_generate_persists_model_adjustments(self, mock_generate):
+		response = self.client.post(
+			reverse("grading:submission_detail", args=[self.first_submission.pk]),
+			{
+				"action": "generate",
+				"model_adjustments": "Please be stricter on statistical interpretation and cite exact lines.",
+			},
+		)
+
+		self.assertEqual(response.status_code, 302)
+		mock_generate.assert_called_once()
+		self.first_submission.refresh_from_db()
+		self.assertEqual(
+			self.first_submission.model_adjustments,
+			"Please be stricter on statistical interpretation and cite exact lines.",
+		)
+
 	@patch("grading.services.canvas_sync.post_submission_grade")
 	def test_post_to_canvas_sends_html_comment(self, mock_post_grade):
 		mock_post_grade.return_value = {"ok": True}
@@ -282,3 +300,25 @@ class ReviewWorkflowTests(TestCase):
 
 		self.assertIn("Header", samples)
 		self.assertIn("hello notebook", samples)
+
+	def test_ai_provider_includes_late_notebook_content_in_prompt_sample(self):
+		long_markdown = "A" * 3500
+		notebook_path = self._write_notebook(
+			"long_prompt_sample.ipynb",
+			[
+				{"cell_type": "markdown", "metadata": {}, "source": [long_markdown]},
+				{"cell_type": "code", "metadata": {}, "source": ["print('LATE_NOTEBOOK_MARKER')\n"]},
+			],
+		)
+		provider = object.__new__(OpenAICompatibleProvider)
+		samples = provider._read_text_samples([SimpleNamespace(local_path=str(notebook_path))])
+
+		self.assertIn("LATE_NOTEBOOK_MARKER", samples)
+
+	def test_ai_provider_includes_late_python_content_in_prompt_sample(self):
+		script_path = Path(self.tempdir.name) / "long_main.py"
+		script_path.write_text(("# filler\n" * 700) + "print('LATE_PYTHON_MARKER')\n", encoding="utf-8")
+		provider = object.__new__(OpenAICompatibleProvider)
+		samples = provider._read_text_samples([SimpleNamespace(local_path=str(script_path))])
+
+		self.assertIn("LATE_PYTHON_MARKER", samples)

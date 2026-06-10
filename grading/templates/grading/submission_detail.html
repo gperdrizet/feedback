@@ -61,6 +61,15 @@
       padding-top: 0.75rem;
       padding-bottom: 0.25rem;
     }
+    .score-distribution { margin-bottom: 1rem; }
+    .score-stats { display: flex; flex-wrap: wrap; gap: 0.45rem; margin: 0.6rem 0 0.8rem; }
+    .score-stats .meta-chip { background: #fff; }
+    .histogram { display: grid; gap: 0.35rem; }
+    .hist-row { display: grid; grid-template-columns: 8.75rem 1fr 2rem; align-items: center; gap: 0.45rem; }
+    .hist-label { font-size: 0.8rem; color: #5a4f41; }
+    .hist-track { background: #efe8db; border: 1px solid #dfd7c8; border-radius: 4px; height: 0.8rem; overflow: hidden; }
+    .hist-fill { background: #8a3200; height: 100%; min-width: 2px; }
+    .hist-count { font-size: 0.8rem; color: #5a4f41; text-align: right; }
     @media (max-width: 1100px) {
       .workspace { grid-template-columns: 1fr; }
       .workspace-editor-column { position: static; top: auto; }
@@ -104,6 +113,31 @@
     {% for message in messages %}
       <div>{{ message }}</div>
     {% endfor %}
+  {% endif %}
+
+  {% if proposed_score_distribution %}
+    <div class="panel score-distribution">
+      <h2>Proposed Score Distribution</h2>
+      <p class="muted">Based on {{ proposed_score_distribution.count }} submission{{ proposed_score_distribution.count|pluralize }} with proposed scores.</p>
+      <div class="score-stats">
+        <span class="meta-chip">Min: {{ proposed_score_distribution.min|floatformat:2 }}</span>
+        <span class="meta-chip">Max: {{ proposed_score_distribution.max|floatformat:2 }}</span>
+        <span class="meta-chip">Mean: {{ proposed_score_distribution.mean|floatformat:2 }}</span>
+        <span class="meta-chip">Median: {{ proposed_score_distribution.median|floatformat:2 }}</span>
+        <span class="meta-chip">Std Dev: {{ proposed_score_distribution.std_dev|floatformat:2 }}</span>
+      </div>
+      <div class="histogram" aria-label="Histogram of proposed scores">
+        {% for bin in proposed_score_distribution.bins %}
+          <div class="hist-row">
+            <div class="hist-label">{{ bin.label }}</div>
+            <div class="hist-track">
+              <div class="hist-fill" style="width:{% widthratio bin.count proposed_score_distribution.max_bin_count 100 %}%;"></div>
+            </div>
+            <div class="hist-count">{{ bin.count }}</div>
+          </div>
+        {% endfor %}
+      </div>
+    </div>
   {% endif %}
 
   <div class="workspace">
@@ -158,6 +192,20 @@
                     data-placeholder="No feedback yet. Generate a draft or type here.">{{ editor_feedback_html|safe }}</div>
             </div>
             <input type="hidden" name="final_feedback" id="final-feedback-hidden">
+            <p><label for="model-adjustments">Adjustments for Regeneration</label></p>
+            <textarea
+              id="model-adjustments"
+              name="model_adjustments"
+              rows="4"
+              placeholder="Optional: give student-specific instructions before clicking Regenerate Draft.">{{ submission.model_adjustments }}</textarea>
+            <p class="muted">These notes apply to this student only and are included when regenerating draft feedback.</p>
+            {% if submission.model_adjustments %}
+              {% if submission.model_adjustments_last_used_at %}
+                <p class="muted">Last used for regeneration: {{ submission.model_adjustments_last_used_at|date:"Y-m-d H:i" }}</p>
+              {% else %}
+                <p class="muted">Current adjustments have not been used in a generated draft yet.</p>
+              {% endif %}
+            {% endif %}
           </div>
           <p class="inline-actions review-actions">
             <label class="score-control">Score <input type="text" name="final_score" value="{{ submission.final_score|default:submission.proposed_score|default:'' }}"></label>

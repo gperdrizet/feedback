@@ -381,6 +381,15 @@ def _build_rubric_for_prompt(assignment):
     return rubric
 
 
+def _merge_prompt_instructions(assignment_instructions, submission_adjustments):
+    parts = []
+    if assignment_instructions and assignment_instructions.strip():
+        parts.append(f"Assignment-level instructions:\n{assignment_instructions.strip()}")
+    if submission_adjustments and submission_adjustments.strip():
+        parts.append(f"Student-specific adjustments:\n{submission_adjustments.strip()}")
+    return "\n\n".join(parts) if parts else None
+
+
 def generate_ai_draft(submission):
     provider = OpenAICompatibleProvider()
     submission.ai_status = SubmissionRecord.AIStatus.PROCESSING
@@ -395,7 +404,10 @@ def generate_ai_draft(submission):
             student_name=submission.student_name,
             artifacts=list(submission.artifacts.all()),
             rubric=rubric or None,
-            extra_instructions=submission.assignment.additional_instructions or None,
+            extra_instructions=_merge_prompt_instructions(
+                submission.assignment.additional_instructions,
+                submission.model_adjustments,
+            ),
         )
     except Exception as exc:  # noqa: BLE001
         submission.ai_status = SubmissionRecord.AIStatus.ERROR
@@ -415,8 +427,18 @@ def generate_ai_draft(submission):
     submission.proposed_score = result.score
     submission.ai_status = SubmissionRecord.AIStatus.COMPLETE
     submission.review_status = SubmissionRecord.ReviewStatus.PENDING
+    if submission.model_adjustments.strip():
+        submission.model_adjustments_last_used_at = timezone.now()
+    else:
+        submission.model_adjustments_last_used_at = None
     submission.save(
-        update_fields=["proposed_feedback", "proposed_score", "ai_status", "review_status"]
+        update_fields=[
+            "proposed_feedback",
+            "proposed_score",
+            "ai_status",
+            "review_status",
+            "model_adjustments_last_used_at",
+        ]
     )
 
 

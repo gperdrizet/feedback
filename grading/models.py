@@ -66,6 +66,8 @@ class SubmissionRecord(models.Model):
     final_score = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
     proposed_feedback = models.TextField(blank=True)
     final_feedback = models.TextField(blank=True)
+    model_adjustments = models.TextField(blank=True)
+    model_adjustments_last_used_at = models.DateTimeField(null=True, blank=True)
     last_error = models.TextField(blank=True)
     posted_at = models.DateTimeField(null=True, blank=True)
     synced_at = models.DateTimeField(default=timezone.now)
