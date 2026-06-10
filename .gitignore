@@ -5,3 +5,5 @@ db.sqlite3
 submissions/
 .env
 deploy-secrets-checklist.local.md
+UPDATES.md
+=[0-9]*
