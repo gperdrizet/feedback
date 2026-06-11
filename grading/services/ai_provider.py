@@ -2,6 +2,7 @@
 
 import json
 import os
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -365,6 +366,38 @@ class OpenAICompatibleProvider:
             return "\n".join(parts).strip()
         return ""
 
+    @staticmethod
+    def _extract_score_from_feedback(feedback):
+        if not feedback:
+            return None
+
+        try:
+            raw = str(feedback)
+            compact = re.sub(r"\s+", " ", raw).strip()
+            plain = re.sub(r"<[^>]+>", " ", compact)
+            plain = re.sub(r"\s+", " ", plain).strip()
+
+            patterns = [
+                r"proposed\s*score[^0-9]{0,40}(\d+(?:\.\d+)?)",
+                r"\btotal\b[^0-9]{0,40}(\d+(?:\.\d+)?)\s*(?:/\s*(\d+(?:\.\d+)?))?",
+            ]
+
+            for target in (compact, plain):
+                for pattern in patterns:
+                    matches = list(re.finditer(pattern, target, flags=re.IGNORECASE))
+                    if not matches:
+                        continue
+
+                    match = matches[-1]
+                    value = float(match.group(1))
+                    if value < 0:
+                        return None
+                    return value
+        except (TypeError, ValueError):
+            return None
+
+        return None
+
     def generate_feedback(
         self,
         assignment_description,
@@ -434,9 +467,11 @@ class OpenAICompatibleProvider:
             if reviewed_feedback:
                 feedback = reviewed_feedback
 
+        score = self._extract_score_from_feedback(feedback)
+
         return AIDraftResult(
             feedback=feedback,
-            score=None,
+            score=score,
             provider_name=self.provider_name,
             model_name=getattr(response, "model", self.model_name),
         )

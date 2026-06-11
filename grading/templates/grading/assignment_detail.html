@@ -22,6 +22,12 @@
     .cohort-summary-body { margin-top: 0.75rem; line-height: 1.55; }
     .cohort-summary-meta { margin-top: 0.5rem; color: #665; font-size: 0.92rem; }
     .cohort-summary-error { color: #a22424; margin-top: 0.5rem; }
+    .histogram { display: grid; gap: 0.35rem; margin-top: 0.75rem; }
+    .hist-row { display: grid; grid-template-columns: 8.75rem 1fr 2rem; align-items: center; gap: 0.45rem; }
+    .hist-label { font-size: 0.8rem; color: #5a4f41; }
+    .hist-track { background: #efe8db; border: 1px solid #dfd7c8; border-radius: 4px; height: 0.8rem; overflow: hidden; }
+    .hist-fill { background: #8a3200; height: 100%; min-width: 2px; }
+    .hist-count { font-size: 0.8rem; color: #5a4f41; text-align: right; }
     /* Rubric editor */
     .rubric-table { border: 1px solid #dfd7c8; border-radius: 6px; overflow: hidden; margin: 0.75rem 0 1rem; }
     .rubric-table-header { display: grid; grid-template-columns: 1fr 2fr; background: #f0ece4; border-bottom: 2px solid #dfd7c8; }
@@ -83,6 +89,31 @@
       <div id="batch-last-error" class="job-status error"></div>
     </div>
   </div>
+
+  {% if proposed_score_distribution %}
+  <div class="panel">
+    <h2>Proposed Score Distribution</h2>
+    <p class="muted">Based on {{ proposed_score_distribution.count }} submission{{ proposed_score_distribution.count|pluralize }} with proposed scores.</p>
+    <div class="stats">
+      <span class="stat-chip">Min: {{ proposed_score_distribution.min|floatformat:2 }}</span>
+      <span class="stat-chip">Max: {{ proposed_score_distribution.max|floatformat:2 }}</span>
+      <span class="stat-chip">Mean: {{ proposed_score_distribution.mean|floatformat:2 }}</span>
+      <span class="stat-chip">Median: {{ proposed_score_distribution.median|floatformat:2 }}</span>
+      <span class="stat-chip">Std Dev: {{ proposed_score_distribution.std_dev|floatformat:2 }}</span>
+    </div>
+    <div class="histogram" aria-label="Histogram of proposed scores">
+      {% for bin in proposed_score_distribution.bins %}
+      <div class="hist-row">
+        <div class="hist-label">{{ bin.label }}</div>
+        <div class="hist-track">
+          <div class="hist-fill" style="width:{% widthratio bin.count proposed_score_distribution.max_bin_count 100 %}%;"></div>
+        </div>
+        <div class="hist-count">{{ bin.count }}</div>
+      </div>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
 
   <div class="panel">
     <h2>Cohort Summary</h2>
