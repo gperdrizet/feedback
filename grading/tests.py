@@ -87,6 +87,14 @@ class ReviewWorkflowTests(TestCase):
 		self.assertEqual(payload["job"]["current_student_name"], "Bob")
 		self.assertEqual(len(payload["submissions"]), 3)
 
+	def test_assignment_detail_shows_proposed_score_distribution(self):
+		response = self.client.get(reverse("grading:assignment_detail", args=[self.assignment.pk]))
+
+		self.assertEqual(response.status_code, 200)
+		self.assertContains(response, "Proposed Score Distribution")
+		self.assertContains(response, "Mean")
+		self.assertContains(response, "Median")
+
 	@patch("grading.views.generate_assignment_cohort_summary")
 	def test_assignment_cohort_summary_generation_saves_rendered_summary(self, mock_generate_summary):
 		self.assignment.cohort_summary_html = "<p>Cohort quality is strong overall.</p>"
@@ -388,3 +396,25 @@ class ReviewWorkflowTests(TestCase):
 		samples = provider._read_text_samples([SimpleNamespace(local_path=str(script_path))])
 
 		self.assertIn("LATE_PYTHON_MARKER", samples)
+
+	def test_ai_provider_extracts_score_from_total_row(self):
+		provider = object.__new__(OpenAICompatibleProvider)
+		feedback = (
+			"<p>Score breakdown:</p>"
+			"<table><tbody>"
+			"<tr><td>Criterion A</td><td>20</td></tr>"
+			"<tr><td>Total</td><td>88.50</td></tr>"
+			"</tbody></table>"
+		)
+
+		score = provider._extract_score_from_feedback(feedback)
+
+		self.assertEqual(score, 88.50)
+
+	def test_ai_provider_extract_score_returns_none_when_missing(self):
+		provider = object.__new__(OpenAICompatibleProvider)
+		feedback = "<p>Great work overall. Keep practicing loops and functions.</p>"
+
+		score = provider._extract_score_from_feedback(feedback)
+
+		self.assertIsNone(score)

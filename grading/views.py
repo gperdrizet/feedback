@@ -563,6 +563,7 @@ def assignment_detail(request, assignment_pk):
 			"rubric_data": rubric_data,
 			"additional_instructions": assignment.additional_instructions,
 			"cohort_summary_html": _sanitize_feedback_html(assignment.cohort_summary_html),
+			"proposed_score_distribution": _proposed_score_distribution(submissions),
 		},
 	)
 
