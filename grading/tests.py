@@ -13,6 +13,7 @@ from django.utils import timezone
 from grading.models import AIFeedbackDraft, AssignmentConfig, BatchReviewJob, CourseSync, SubmissionArtifact, SubmissionRecord
 from grading.services.ai_provider import OpenAICompatibleProvider
 from grading.services.canvas_sync import generate_ai_draft, post_submission_to_canvas
+from grading.services.batch_jobs import run_batch_review_job
 
 
 class ReviewWorkflowTests(TestCase):
@@ -67,6 +68,40 @@ class ReviewWorkflowTests(TestCase):
 		self.assertEqual(BatchReviewJob.objects.filter(assignment=self.assignment).count(), 1)
 		job = BatchReviewJob.objects.get(assignment=self.assignment)
 		self.assertEqual(job.status, BatchReviewJob.Status.QUEUED)
+		self.assertFalse(job.use_detailed_passes)
+		self.assertFalse(job.use_review_pass)
+
+	def test_assignment_batch_review_can_set_generation_modes(self):
+		response = self.client.post(
+			reverse("grading:assignment_detail", args=[self.assignment.pk]),
+			{
+				"action": "batch_review",
+				"use_detailed_passes": "1",
+				"use_review_pass": "1",
+			},
+		)
+
+		self.assertEqual(response.status_code, 302)
+		job = BatchReviewJob.objects.get(assignment=self.assignment)
+		self.assertTrue(job.use_detailed_passes)
+		self.assertTrue(job.use_review_pass)
+
+	@patch("grading.services.batch_jobs.generate_ai_draft")
+	@patch("grading.services.batch_jobs.sync_assignment")
+	def test_batch_worker_uses_job_generation_modes(self, mock_sync_assignment, mock_generate_ai_draft):
+		job = BatchReviewJob.objects.create(
+			assignment=self.assignment,
+			status=BatchReviewJob.Status.QUEUED,
+			use_detailed_passes=True,
+			use_review_pass=True,
+		)
+
+		run_batch_review_job(job.pk)
+
+		self.assertEqual(mock_generate_ai_draft.call_count, 3)
+		for call in mock_generate_ai_draft.call_args_list:
+			self.assertEqual(call.kwargs["use_detailed_passes"], True)
+			self.assertEqual(call.kwargs["use_review_pass"], True)
 
 	def test_assignment_batch_status_endpoint_returns_job_and_rows(self):
 		job = BatchReviewJob.objects.create(
