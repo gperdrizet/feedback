@@ -7,14 +7,19 @@ from grading.models import AssignmentConfig, BatchReviewJob
 from grading.services.canvas_sync import generate_ai_draft, sync_assignment
 
 
-def enqueue_batch_review_job(assignment):
+def enqueue_batch_review_job(assignment, use_detailed_passes=False, use_review_pass=False):
     running_job = assignment.batch_jobs.filter(
         status__in=[BatchReviewJob.Status.QUEUED, BatchReviewJob.Status.RUNNING]
     ).order_by("-created_at").first()
     if running_job:
         return running_job, False
 
-    job = BatchReviewJob.objects.create(assignment=assignment, status=BatchReviewJob.Status.QUEUED)
+    job = BatchReviewJob.objects.create(
+        assignment=assignment,
+        status=BatchReviewJob.Status.QUEUED,
+        use_detailed_passes=use_detailed_passes,
+        use_review_pass=use_review_pass,
+    )
     return job, True
 
 
@@ -94,7 +99,11 @@ def run_batch_review_job(job_pk):
             job.current_student_name = submission.student_name
             job.save(update_fields=["current_student_name"])
             try:
-                generate_ai_draft(submission)
+                generate_ai_draft(
+                    submission,
+                    use_detailed_passes=job.use_detailed_passes,
+                    use_review_pass=job.use_review_pass,
+                )
                 job.completed_submissions += 1
             except Exception as exc:  # noqa: BLE001
                 job.failed_submissions += 1

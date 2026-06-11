@@ -11,6 +11,9 @@
     a { color: #8a3200; }
     .panel { background: #fffdf7; padding: 1rem; border: 1px solid #dfd7c8; border-radius: 8px; margin-bottom: 1rem; }
     .actions { display: flex; gap: 0.75rem; flex-wrap: wrap; align-items: center; }
+    .batch-options { display: flex; gap: 1rem; flex-wrap: wrap; align-items: center; }
+    .batch-options label { display: inline-flex; align-items: center; gap: 0.35rem; font-size: 0.95rem; }
+    .batch-help { color: #665; font-size: 0.92rem; margin-top: 0.45rem; }
     .button { display: inline-block; padding: 0.5rem 0.85rem; border: 1px solid #8a3200; border-radius: 6px; background: #fff6ee; text-decoration: none; color: #8a3200; }
     .button.primary { background: #8a3200; color: #fff; }
     .stats { display: flex; gap: 0.75rem; flex-wrap: wrap; margin-top: 0.75rem; }
@@ -71,7 +74,15 @@
       {% csrf_token %}
       <input type="hidden" name="action" value="batch_review">
       <button type="submit" class="button primary">Batch Download &amp; Generate Drafts</button>
+      <div class="batch-options" role="group" aria-label="Batch generation mode options">
+        <label><input type="checkbox" name="use_detailed_passes" value="1"> Use detailed multi-pass generation</label>
+        <label><input type="checkbox" name="use_review_pass" value="1"> Add second-pass refinement</label>
+      </div>
     </form>
+    <p class="batch-help"><strong>Default if unchecked:</strong> single-pass generation with no refinement.</p>
+    {% if latest_batch_mode %}
+      <p class="batch-help"><strong>Latest job mode:</strong> {{ latest_batch_mode }}</p>
+    {% endif %}
     <div id="batch-progress" data-status-url="{% url 'grading:assignment_batch_status' assignment.pk %}">
       <div id="batch-job-status" class="job-status">
         {% if latest_batch_job %}

@@ -136,6 +136,8 @@ def _serialize_batch_job(job):
 	return {
 		"id": job.pk,
 		"status": job.status,
+		"use_detailed_passes": job.use_detailed_passes,
+		"use_review_pass": job.use_review_pass,
 		"total_submissions": job.total_submissions,
 		"completed_submissions": job.completed_submissions,
 		"failed_submissions": job.failed_submissions,
@@ -149,6 +151,13 @@ def _serialize_batch_job(job):
 
 def _start_batch_review_job(assignment):
 	return enqueue_batch_review_job(assignment)
+
+
+def _batch_mode_label(use_detailed_passes, use_review_pass):
+	mode = "Detailed multi-pass" if use_detailed_passes else "Single-pass"
+	if use_review_pass:
+		return f"{mode} + refinement"
+	return mode
 
 
 def _neighboring_submission_ids(submissions, current_submission_id):
@@ -511,9 +520,18 @@ def assignment_detail(request, assignment_pk):
 	if request.method == "POST":
 		action = request.POST.get("action")
 		if action == "batch_review":
-			job, created = _start_batch_review_job(assignment)
+			use_detailed_passes = request.POST.get("use_detailed_passes") == "1"
+			use_review_pass = request.POST.get("use_review_pass") == "1"
+			job, created = enqueue_batch_review_job(
+				assignment,
+				use_detailed_passes=use_detailed_passes,
+				use_review_pass=use_review_pass,
+			)
 			if created:
-				messages.success(request, "Batch review started.")
+				messages.success(
+					request,
+					f"Batch review started ({_batch_mode_label(use_detailed_passes, use_review_pass)}).",
+				)
 			else:
 				messages.info(request, "A batch review job is already running for this assignment.")
 		elif action == "save_instructions":
@@ -577,6 +595,10 @@ def assignment_detail(request, assignment_pk):
 			"assignment": assignment,
 			"submissions": submissions,
 			"latest_batch_job": latest_job,
+			"latest_batch_mode": _batch_mode_label(
+				latest_job.use_detailed_passes,
+				latest_job.use_review_pass,
+			) if latest_job else None,
 			"rubric_data": rubric_data,
 			"additional_instructions": assignment.additional_instructions,
 			"cohort_summary_html": _sanitize_feedback_html(assignment.cohort_summary_html),

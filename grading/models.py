@@ -159,6 +159,8 @@ class BatchReviewJob(models.Model):
 
     assignment = models.ForeignKey(AssignmentConfig, on_delete=models.CASCADE, related_name="batch_jobs")
     status = models.CharField(max_length=20, choices=Status.choices, default=Status.QUEUED)
+    use_detailed_passes = models.BooleanField(default=False)
+    use_review_pass = models.BooleanField(default=False)
     total_submissions = models.PositiveIntegerField(default=0)
     completed_submissions = models.PositiveIntegerField(default=0)
     failed_submissions = models.PositiveIntegerField(default=0)
