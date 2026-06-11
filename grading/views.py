@@ -445,9 +445,26 @@ def _proposed_score_distribution(submissions, bin_count=10):
 	}
 
 
+def _generation_mode_label(prompt_version):
+	version = (prompt_version or "").strip().lower()
+	if version == "v1-single+review":
+		return "Single-pass + refinement"
+	if version == "v1-detailed":
+		return "Detailed multi-pass"
+	if version == "v1-detailed+review":
+		return "Detailed multi-pass + refinement"
+	if version == "v1-single":
+		return "Single-pass"
+	return "Single-pass"
+
+
 def gradebook(request):
 	assignments = AssignmentConfig.objects.select_related("course").prefetch_related("submissions")
 	return render(request, "grading/gradebook.html", {"assignments": assignments})
+
+
+def about(request):
+	return render(request, "grading/about.html")
 
 
 def delete_assignment(request, assignment_pk):
@@ -607,7 +624,12 @@ def submission_detail(request, submission_pk):
 		try:
 			if action == "generate":
 				use_review_pass = request.POST.get("use_review_pass") == "1"
-				generate_ai_draft(submission, use_review_pass=use_review_pass)
+				use_detailed_passes = request.POST.get("use_detailed_passes") == "1"
+				generate_ai_draft(
+					submission,
+					use_review_pass=use_review_pass,
+					use_detailed_passes=use_detailed_passes,
+				)
 				messages.success(request, "AI draft generated.")
 			elif action == "save":
 				submission.final_feedback = _sanitize_feedback_html(
@@ -674,6 +696,7 @@ def submission_detail(request, submission_pk):
 					"created_at": draft.created_at,
 					"provider_name": draft.provider_name,
 					"model_name": draft.model_name,
+					"generation_mode": _generation_mode_label(draft.prompt_version),
 					"draft_score": draft.draft_score,
 					"feedback_html": _sanitize_feedback_html(draft.draft_feedback),
 				}

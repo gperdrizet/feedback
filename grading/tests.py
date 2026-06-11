@@ -12,7 +12,7 @@ from django.utils import timezone
 
 from grading.models import AIFeedbackDraft, AssignmentConfig, BatchReviewJob, CourseSync, SubmissionArtifact, SubmissionRecord
 from grading.services.ai_provider import OpenAICompatibleProvider
-from grading.services.canvas_sync import post_submission_to_canvas
+from grading.services.canvas_sync import generate_ai_draft, post_submission_to_canvas
 
 
 class ReviewWorkflowTests(TestCase):
@@ -94,6 +94,14 @@ class ReviewWorkflowTests(TestCase):
 		self.assertContains(response, "Proposed Score Distribution")
 		self.assertContains(response, "Mean")
 		self.assertContains(response, "Median")
+
+	def test_about_page_renders_workflow_sections(self):
+		response = self.client.get(reverse("grading:about"))
+
+		self.assertEqual(response.status_code, 200)
+		self.assertContains(response, "Workflow Diagram")
+		self.assertContains(response, "Evidence Pass")
+		self.assertContains(response, "Consistency Pass")
 
 	@patch("grading.views.generate_assignment_cohort_summary")
 	def test_assignment_cohort_summary_generation_saves_rendered_summary(self, mock_generate_summary):
@@ -210,7 +218,11 @@ class ReviewWorkflowTests(TestCase):
 			self.first_submission.model_adjustments,
 			"Please be stricter on statistical interpretation and cite exact lines.",
 		)
-		mock_generate.assert_called_with(self.first_submission, use_review_pass=False)
+		mock_generate.assert_called_with(
+			self.first_submission,
+			use_review_pass=False,
+			use_detailed_passes=False,
+		)
 
 	@patch("grading.views.generate_ai_draft")
 	def test_submission_generate_can_enable_second_pass(self, mock_generate):
@@ -223,7 +235,28 @@ class ReviewWorkflowTests(TestCase):
 		)
 
 		self.assertEqual(response.status_code, 302)
-		mock_generate.assert_called_once_with(self.first_submission, use_review_pass=True)
+		mock_generate.assert_called_once_with(
+			self.first_submission,
+			use_review_pass=True,
+			use_detailed_passes=False,
+		)
+
+	@patch("grading.views.generate_ai_draft")
+	def test_submission_generate_can_enable_detailed_passes(self, mock_generate):
+		response = self.client.post(
+			reverse("grading:submission_detail", args=[self.first_submission.pk]),
+			{
+				"action": "generate",
+				"use_detailed_passes": "1",
+			},
+		)
+
+		self.assertEqual(response.status_code, 302)
+		mock_generate.assert_called_once_with(
+			self.first_submission,
+			use_review_pass=False,
+			use_detailed_passes=True,
+		)
 
 	@patch("grading.services.canvas_sync.post_submission_grade")
 	def test_post_to_canvas_sends_html_comment(self, mock_post_grade):
@@ -342,6 +375,7 @@ class ReviewWorkflowTests(TestCase):
 			submission=self.first_submission,
 			provider_name="provider-a",
 			model_name="model-a",
+			prompt_version="v1-detailed",
 			draft_feedback="<p>First draft body</p>",
 			draft_score=Decimal("85.00"),
 		)
@@ -349,6 +383,7 @@ class ReviewWorkflowTests(TestCase):
 			submission=self.first_submission,
 			provider_name="provider-b",
 			model_name="model-b",
+			prompt_version="v1-single+review",
 			draft_feedback="<p>Second draft body</p>",
 			draft_score=Decimal("88.00"),
 		)
@@ -360,6 +395,28 @@ class ReviewWorkflowTests(TestCase):
 		self.assertContains(response, "Second draft body")
 		self.assertContains(response, "Provider: provider-a")
 		self.assertContains(response, "Provider: provider-b")
+		self.assertContains(response, "Mode: Detailed multi-pass")
+		self.assertContains(response, "Mode: Single-pass + refinement")
+
+	@patch("grading.services.canvas_sync.OpenAICompatibleProvider")
+	def test_generate_ai_draft_records_generation_mode_in_prompt_version(self, mock_provider_cls):
+		provider = mock_provider_cls.return_value
+		provider.generate_feedback.return_value = SimpleNamespace(
+			feedback="<p>Generated feedback</p>",
+			score=91,
+			provider_name="test-provider",
+			model_name="test-model",
+		)
+
+		generate_ai_draft(
+			self.first_submission,
+			use_detailed_passes=True,
+			use_review_pass=True,
+		)
+
+		draft = self.first_submission.ai_drafts.order_by("-created_at").first()
+		self.assertIsNotNone(draft)
+		self.assertEqual(draft.prompt_version, "v1-detailed+review")
 
 	def test_ai_provider_extracts_notebook_cells_for_prompt(self):
 		notebook_path = self._write_notebook(

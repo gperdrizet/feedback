@@ -6,6 +6,7 @@ app_name = "grading"
 
 urlpatterns = [
     path("", views.gradebook, name="gradebook"),
+    path("about/", views.about, name="about"),
     path("sync/", views.sync_assignment, name="sync_assignment"),
     path("assignments/<int:assignment_pk>/delete/", views.delete_assignment, name="delete_assignment"),
     path("assignments/<int:assignment_pk>/", views.assignment_detail, name="assignment_detail"),

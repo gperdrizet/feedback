@@ -220,6 +220,140 @@ class OpenAICompatibleProvider:
             f"{file_samples}\n"
         )
 
+    def _build_submission_context(self, assignment_description, student_name, artifacts, rubric=None, extra_instructions=None):
+        artifact_summary = self._artifact_summary(artifacts)
+        file_samples = self._read_text_samples(artifacts)
+        rubric_block = self._build_rubric_block(rubric)
+        rubric_section = f"\n{rubric_block}\n" if rubric_block else ""
+        extra_section = (
+            f"\nAdditional instructor guidance for this assignment:\n{extra_instructions.strip()}\n"
+            if extra_instructions and extra_instructions.strip()
+            else ""
+        )
+
+        return (
+            f"Student: {student_name}\n\n"
+            "Assignment description from Canvas:\n"
+            f"{assignment_description[:8000]}\n"
+            f"{rubric_section}"
+            f"{extra_section}\n"
+            "Artifacts available:\n"
+            f"{artifact_summary}\n\n"
+            "Extracted text samples from submitted files:\n"
+            f"{file_samples}\n"
+        )
+
+    def _run_generation_pass(self, system_prompt, user_prompt):
+        response = self.client.chat.completions.create(
+            model=self.model_name,
+            temperature=self.temperature,
+            messages=[
+                {
+                    "role": "system",
+                    "content": system_prompt,
+                },
+                {
+                    "role": "user",
+                    "content": user_prompt,
+                },
+            ],
+        )
+        content = self._extract_content(response)
+        if not content:
+            raise ValueError("AI pass returned no content.")
+        return content, getattr(response, "model", self.model_name)
+
+    def _generate_feedback_with_detailed_passes(
+        self,
+        assignment_description,
+        student_name,
+        artifacts,
+        rubric=None,
+        extra_instructions=None,
+    ):
+        context_block = self._build_submission_context(
+            assignment_description=assignment_description,
+            student_name=student_name,
+            artifacts=artifacts,
+            rubric=rubric,
+            extra_instructions=extra_instructions,
+        )
+
+        evidence_prompt = (
+            "Extract factual evidence from the submission context below. "
+            "Return concise plain text under exactly these headings: "
+            "Submission Summary, Confirmed Strength Evidence, Confirmed Issue Evidence, "
+            "Missing or Unclear Evidence. Keep each section short and specific.\n\n"
+            f"{context_block}"
+        )
+        evidence_text, model_name = self._run_generation_pass(
+            "You are a careful evaluator. Only report claims directly supported by evidence.",
+            evidence_prompt,
+        )
+
+        evaluation_prompt = (
+            "Using only the evidence below, produce an evaluation plan in plain text. "
+            "Use headings: Strengths to Reinforce, Priority Improvements, Suggested Next Actions, "
+            "Scoring Notes. Keep recommendations concrete and assignment-focused.\n\n"
+            "Evidence:\n"
+            f"{evidence_text}\n\n"
+            "Original submission context:\n"
+            f"{context_block}"
+        )
+        evaluation_text, model_name = self._run_generation_pass(
+            "You are an instructional coach creating practical feedback plans.",
+            evaluation_prompt,
+        )
+
+        has_rubric = bool(rubric)
+        if has_rubric:
+            html_structure = (
+                "Produce HTML using only: <p>, <strong>, <em>, <ul>, <ol>, <li>, <table>, <thead>, <tbody>, <tr>, <th>, <td>. "
+                "Structure sections in order: Summary, Strengths, Areas for Improvement, Suggested Next Steps, Score Breakdown. "
+                "For Score Breakdown include a table with columns Criterion, Selected Level Description, and Points, then a Total row. "
+                "Do not use markdown."
+            )
+        else:
+            html_structure = (
+                "Produce HTML using only: <p>, <strong>, <em>, <ul>, <ol>, <li>. "
+                "Structure sections in order: Summary, Strengths, Improvements, Suggested Next Steps, Proposed Score. "
+                "Do not use markdown."
+            )
+
+        narrative_prompt = (
+            "Create instructor-ready student feedback from the plan and evidence below. "
+            f"{html_structure}"
+            " If evidence is insufficient, explicitly say so in the relevant section.\n\n"
+            "Evaluation plan:\n"
+            f"{evaluation_text}\n\n"
+            "Evidence:\n"
+            f"{evidence_text}\n\n"
+            "Original submission context:\n"
+            f"{context_block}"
+        )
+        feedback_html, model_name = self._run_generation_pass(
+            "You are a strict but constructive instructor assistant writing clean HTML feedback.",
+            narrative_prompt,
+        )
+
+        consistency_prompt = (
+            "Check and revise the HTML feedback below for consistency with the evidence and evaluation plan. "
+            "Keep the same structure, remove unsupported claims, and improve clarity. "
+            "Return only revised HTML using the same allowed tags.\n\n"
+            "Evidence:\n"
+            f"{evidence_text}\n\n"
+            "Evaluation plan:\n"
+            f"{evaluation_text}\n\n"
+            "Draft HTML feedback:\n"
+            f"{feedback_html}\n"
+        )
+        consistent_feedback_html, model_name = self._run_generation_pass(
+            "You are a strict quality reviewer for instructional feedback.",
+            consistency_prompt,
+        )
+
+        return consistent_feedback_html, model_name
+
     def _format_cohort_feedback_block(self, feedback_entries, max_entries=80, max_chars_each=1200):
         if not feedback_entries:
             return "No student feedback entries are available."
@@ -406,36 +540,30 @@ class OpenAICompatibleProvider:
         rubric=None,
         extra_instructions=None,
         enable_review_pass=False,
+        enable_detailed_passes=False,
     ):
-        prompt = self._build_prompt(
-            assignment_description=assignment_description,
-            student_name=student_name,
-            artifacts=artifacts,
-            rubric=rubric,
-            extra_instructions=extra_instructions,
-        )
+        model_name = self.model_name
+        if enable_detailed_passes:
+            feedback, model_name = self._generate_feedback_with_detailed_passes(
+                assignment_description=assignment_description,
+                student_name=student_name,
+                artifacts=artifacts,
+                rubric=rubric,
+                extra_instructions=extra_instructions,
+            )
+        else:
+            prompt = self._build_prompt(
+                assignment_description=assignment_description,
+                student_name=student_name,
+                artifacts=artifacts,
+                rubric=rubric,
+                extra_instructions=extra_instructions,
+            )
 
-        response = self.client.chat.completions.create(
-            model=self.model_name,
-            temperature=self.temperature,
-            messages=[
-                {
-                    "role": "system",
-                    "content": (
-                        "You are a strict but constructive instructor assistant. "
-                        "Output valid HTML only using simple formatting tags."
-                    ),
-                },
-                {
-                    "role": "user",
-                    "content": prompt,
-                },
-            ],
-        )
-
-        feedback = self._extract_content(response)
-        if not feedback:
-            raise ValueError("AI response did not contain message content.")
+            feedback, model_name = self._run_generation_pass(
+                "You are a strict but constructive instructor assistant. Output valid HTML only using simple formatting tags.",
+                prompt,
+            )
 
         if enable_review_pass:
             review_prompt = self._build_review_prompt(
@@ -446,24 +574,10 @@ class OpenAICompatibleProvider:
                 rubric=rubric,
                 extra_instructions=extra_instructions,
             )
-            review_response = self.client.chat.completions.create(
-                model=self.model_name,
-                temperature=self.temperature,
-                messages=[
-                    {
-                        "role": "system",
-                        "content": (
-                            "You are a strict but constructive instructor assistant. "
-                            "Revise for quality and output valid HTML only using simple formatting tags."
-                        ),
-                    },
-                    {
-                        "role": "user",
-                        "content": review_prompt,
-                    },
-                ],
+            reviewed_feedback, model_name = self._run_generation_pass(
+                "You are a strict but constructive instructor assistant. Revise for quality and output valid HTML only using simple formatting tags.",
+                review_prompt,
             )
-            reviewed_feedback = self._extract_content(review_response)
             if reviewed_feedback:
                 feedback = reviewed_feedback
 
@@ -473,5 +587,5 @@ class OpenAICompatibleProvider:
             feedback=feedback,
             score=score,
             provider_name=self.provider_name,
-            model_name=getattr(response, "model", self.model_name),
+            model_name=model_name,
         )
