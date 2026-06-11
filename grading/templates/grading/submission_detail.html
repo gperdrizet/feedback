@@ -87,6 +87,7 @@
 </head>
 <body>
   <p><a href="{% url 'grading:assignment_detail' submission.assignment.pk %}">Back to assignment</a></p>
+  <p><a href="{% url 'grading:about' %}">About feedback generation workflow</a></p>
   <div class="submission-header">
     <h1>{{ submission.student_name }}</h1>
     <p class="header-meta">
@@ -157,6 +158,7 @@
           <div class="draft-meta">
             <span class="meta-chip">Provider: {{ draft.provider_name }}</span>
             <span class="meta-chip">Model: {{ draft.model_name }}</span>
+            <span class="meta-chip">Mode: {{ draft.generation_mode }}</span>
             {% if draft.draft_score is not None %}<span class="meta-chip">Score: {{ draft.draft_score }}</span>{% endif %}
           </div>
           <div class="draft-history-body">{{ draft.feedback_html|safe }}</div>
@@ -234,6 +236,7 @@
           </div>
           <p class="inline-actions review-actions">
             <label class="score-control">Score <input type="text" name="final_score" value="{{ submission.final_score|default:submission.proposed_score|default:'' }}"></label>
+            <label class="score-control"><input type="checkbox" name="use_detailed_passes" value="1"> Use detailed multi-pass generation</label>
             <label class="score-control"><input type="checkbox" name="use_review_pass" value="1"> Use second-pass refinement on regenerate</label>
             <button type="submit" name="action" value="save">Save Review</button>
             <button type="submit" name="action" value="post">Post to Canvas</button>

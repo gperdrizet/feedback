@@ -390,7 +390,14 @@ def _merge_prompt_instructions(assignment_instructions, submission_adjustments):
     return "\n\n".join(parts) if parts else None
 
 
-def generate_ai_draft(submission, use_review_pass=False):
+def _prompt_version_for_generation_mode(use_detailed_passes=False, use_review_pass=False):
+    mode = "detailed" if use_detailed_passes else "single"
+    if use_review_pass:
+        mode = f"{mode}+review"
+    return f"v1-{mode}"
+
+
+def generate_ai_draft(submission, use_review_pass=False, use_detailed_passes=False):
     provider = OpenAICompatibleProvider()
     submission.ai_status = SubmissionRecord.AIStatus.PROCESSING
     submission.last_error = ""
@@ -409,6 +416,7 @@ def generate_ai_draft(submission, use_review_pass=False):
                 submission.model_adjustments,
             ),
             enable_review_pass=use_review_pass,
+            enable_detailed_passes=use_detailed_passes,
         )
     except Exception as exc:  # noqa: BLE001
         submission.ai_status = SubmissionRecord.AIStatus.ERROR
@@ -420,6 +428,10 @@ def generate_ai_draft(submission, use_review_pass=False):
         submission=submission,
         provider_name=result.provider_name,
         model_name=result.model_name,
+        prompt_version=_prompt_version_for_generation_mode(
+            use_detailed_passes=use_detailed_passes,
+            use_review_pass=use_review_pass,
+        ),
         draft_feedback=result.feedback,
         draft_score=result.score,
     )

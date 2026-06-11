@@ -1,0 +1,150 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <link rel="icon" href="/favicon.ico">
+  <title>About Feedback Generation Workflow</title>
+  <style>
+    :root {
+      --bg: #f6f4ef;
+      --panel: #fffdf7;
+      --ink: #222;
+      --muted: #665;
+      --accent: #8a3200;
+      --line: #dfd7c8;
+      --chip: #f4eadf;
+    }
+    body {
+      font-family: Georgia, serif;
+      margin: 2rem;
+      background: radial-gradient(circle at 20% 5%, #fffaf2, var(--bg) 55%);
+      color: var(--ink);
+      line-height: 1.55;
+    }
+    a { color: var(--accent); }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 10px;
+      padding: 1rem 1.1rem;
+      margin-bottom: 1rem;
+    }
+    .diagram {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(120px, 1fr));
+      gap: 0.65rem;
+      align-items: stretch;
+      margin-top: 0.8rem;
+    }
+    .step {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      padding: 0.7rem;
+      position: relative;
+      min-height: 120px;
+    }
+    .step h3 {
+      font-size: 0.95rem;
+      margin: 0 0 0.35rem;
+      color: #5a2300;
+    }
+    .step p {
+      font-size: 0.88rem;
+      margin: 0;
+      color: #453d33;
+    }
+    .step::after {
+      content: "->";
+      position: absolute;
+      right: -0.55rem;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #7b644f;
+      font-weight: bold;
+      background: var(--bg);
+      padding: 0 0.25rem;
+    }
+    .step:last-child::after { content: ""; }
+    .chips {
+      display: flex;
+      gap: 0.45rem;
+      flex-wrap: wrap;
+      margin-top: 0.6rem;
+    }
+    .chip {
+      border-radius: 999px;
+      border: 1px solid #e2cdb6;
+      background: var(--chip);
+      padding: 0.2rem 0.55rem;
+      font-size: 0.84rem;
+      color: #5b3519;
+    }
+    .muted { color: var(--muted); }
+    ol { margin: 0.35rem 0 0 1.2rem; }
+    @media (max-width: 1050px) {
+      .diagram { grid-template-columns: 1fr; }
+      .step::after {
+        content: "v";
+        right: 50%;
+        top: auto;
+        bottom: -0.7rem;
+        transform: translateX(50%);
+      }
+      .step:last-child::after { content: ""; }
+    }
+  </style>
+</head>
+<body>
+  <p><a href="{% url 'grading:gradebook' %}">Back to gradebook</a></p>
+  <h1>About the Feedback Generation Workflow</h1>
+
+  <div class="panel">
+    <p>This app uses a multi-pass workflow so each model call has one narrow job. That improves reliability, especially on smaller or older models.</p>
+    <div class="chips">
+      <span class="chip">Evidence first</span>
+      <span class="chip">Plan before prose</span>
+      <span class="chip">Consistency pass</span>
+      <span class="chip">Optional final refinement</span>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Workflow Diagram</h2>
+    <div class="diagram" aria-label="Feedback generation workflow diagram">
+      <div class="step">
+        <h3>1. Build Context</h3>
+        <p>Collect assignment description, rubric, instructor notes, student adjustments, and sampled artifact text.</p>
+      </div>
+      <div class="step">
+        <h3>2. Evidence Pass</h3>
+        <p>Extract only supported observations: strengths, issues, and missing evidence.</p>
+      </div>
+      <div class="step">
+        <h3>3. Evaluation Pass</h3>
+        <p>Convert evidence into a concise action plan and scoring notes.</p>
+      </div>
+      <div class="step">
+        <h3>4. Narrative Pass</h3>
+        <p>Generate student-facing HTML feedback with clear sections and rubric alignment.</p>
+      </div>
+      <div class="step">
+        <h3>5. Consistency Pass</h3>
+        <p>Remove unsupported claims, tighten wording, and keep structure intact.</p>
+      </div>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>Step-by-Step Description</h2>
+    <ol>
+      <li>Context assembly limits prompt size while preserving enough evidence for grading.</li>
+      <li>Evidence extraction prevents the model from inventing claims before writing feedback.</li>
+      <li>Evaluation planning makes improvements and next actions concrete and teachable.</li>
+      <li>Narrative synthesis produces the final student-facing feedback in clean HTML.</li>
+      <li>Consistency review validates that final text still matches evidence and rubric intent.</li>
+    </ol>
+    <p class="muted">When enabled, this multi-pass mode runs on regenerate. The existing second-pass refinement can still be added after it.</p>
+  </div>
+</body>
+</html>
