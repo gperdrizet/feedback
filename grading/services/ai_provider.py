@@ -16,6 +16,7 @@ class AIDraftResult:
     score: float | None
     provider_name: str
     model_name: str
+    prompt_diagnostics: dict
 
 
 class OpenAICompatibleProvider:
@@ -37,6 +38,7 @@ class OpenAICompatibleProvider:
             )
 
         self.client = OpenAI(base_url=self.base_url, api_key=self.api_key)
+        self._last_sampling_diagnostics = {}
 
     def _artifact_summary(self, artifacts):
         lines = []
@@ -55,6 +57,22 @@ class OpenAICompatibleProvider:
         except ValueError:
             return default
         return parsed if parsed > 0 else default
+
+    @staticmethod
+    def _head_tail_sample(text, max_chars):
+        if len(text) <= max_chars:
+            return text, False
+
+        # Preserve both early and late content so init/setup and final execution calls are visible.
+        head_chars = int(max_chars * 0.7)
+        tail_chars = max_chars - head_chars
+        head = text[:head_chars].rstrip()
+        tail = text[-tail_chars:].lstrip()
+        return (
+            f"{head}\n\n"
+            "[... truncated middle content ...]\n\n"
+            f"{tail}"
+        ), True
 
     @staticmethod
     def _notebook_text_sample(content, max_chars_per_file):
@@ -86,21 +104,35 @@ class OpenAICompatibleProvider:
             parts.append(f"[Cell {index} - {cell_type}]\n{text}")
 
         if not parts:
-            return "Notebook file found, but cells contained no readable source text."
+            return "Notebook file found, but cells contained no readable source text.", False
 
         notebook_text = "\n\n".join(parts)
-        return notebook_text[:max_chars_per_file]
+        return OpenAICompatibleProvider._head_tail_sample(notebook_text, max_chars_per_file)
 
-    def _read_text_samples(self, artifacts, max_files=5, max_chars_per_file=None, max_total_chars=None):
+    def _read_text_samples(self, artifacts, max_files=None, max_chars_per_file=None, max_total_chars=None):
+        if max_files is None:
+            max_files = self._positive_int_env("FEEDBACK_MAX_PROMPT_FILES", 8)
         if max_chars_per_file is None:
-            max_chars_per_file = self._positive_int_env("FEEDBACK_MAX_PROMPT_FILE_CHARS", 12000)
+            max_chars_per_file = self._positive_int_env("FEEDBACK_MAX_PROMPT_FILE_CHARS", 24000)
         if max_total_chars is None:
-            max_total_chars = self._positive_int_env("FEEDBACK_MAX_PROMPT_TOTAL_CHARS", 24000)
+            max_total_chars = self._positive_int_env("FEEDBACK_MAX_PROMPT_TOTAL_CHARS", 52000)
 
         samples = []
         total_chars = 0
+        diagnostics = {
+            "max_files": max_files,
+            "max_chars_per_file": max_chars_per_file,
+            "max_total_chars": max_total_chars,
+            "files_sampled": 0,
+            "total_chars_used": 0,
+            "truncated": False,
+            "truncated_file_count": 0,
+            "truncated_files": [],
+        }
+
         for artifact in artifacts:
             if len(samples) >= max_files or total_chars >= max_total_chars:
+                diagnostics["truncated"] = True
                 break
             if not artifact.local_path:
                 continue
@@ -130,8 +162,9 @@ class OpenAICompatibleProvider:
             is_notebook_candidate = suffix == ".ipynb" or '"cells"' in content
 
             extracted = None
+            extracted_was_truncated = False
             if is_notebook_candidate:
-                extracted = self._notebook_text_sample(content, max_chars_per_file)
+                extracted, extracted_was_truncated = self._notebook_text_sample(content, max_chars_per_file)
 
             if extracted is None and not is_text_suffix:
                 continue
@@ -142,7 +175,8 @@ class OpenAICompatibleProvider:
 
             file_char_budget = min(max_chars_per_file, remaining_chars)
             sample_text = extracted if extracted is not None else content
-            sample_text = sample_text[:file_char_budget]
+            sample_text, was_truncated_for_budget = self._head_tail_sample(sample_text, file_char_budget)
+            was_truncated = extracted_was_truncated or was_truncated_for_budget
 
             block = (
                 f"\n### File: {path.name}\n"
@@ -150,6 +184,15 @@ class OpenAICompatibleProvider:
             )
             samples.append(block)
             total_chars += len(block)
+            diagnostics["files_sampled"] += 1
+
+            if was_truncated:
+                diagnostics["truncated"] = True
+                diagnostics["truncated_file_count"] += 1
+                diagnostics["truncated_files"].append(path.name)
+
+        diagnostics["total_chars_used"] = total_chars
+        self._last_sampling_diagnostics = diagnostics
 
         return "\n".join(samples) if samples else "No text samples could be extracted."
 
@@ -543,6 +586,7 @@ class OpenAICompatibleProvider:
         enable_detailed_passes=False,
     ):
         model_name = self.model_name
+        sampling_diagnostics = {}
         if enable_detailed_passes:
             feedback, model_name = self._generate_feedback_with_detailed_passes(
                 assignment_description=assignment_description,
@@ -551,6 +595,7 @@ class OpenAICompatibleProvider:
                 rubric=rubric,
                 extra_instructions=extra_instructions,
             )
+            sampling_diagnostics = dict(self._last_sampling_diagnostics)
         else:
             prompt = self._build_prompt(
                 assignment_description=assignment_description,
@@ -559,6 +604,7 @@ class OpenAICompatibleProvider:
                 rubric=rubric,
                 extra_instructions=extra_instructions,
             )
+            sampling_diagnostics = dict(self._last_sampling_diagnostics)
 
             feedback, model_name = self._run_generation_pass(
                 "You are a strict but constructive instructor assistant. Output valid HTML only using simple formatting tags.",
@@ -588,4 +634,5 @@ class OpenAICompatibleProvider:
             score=score,
             provider_name=self.provider_name,
             model_name=model_name,
+            prompt_diagnostics=sampling_diagnostics,
         )

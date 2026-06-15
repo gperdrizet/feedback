@@ -492,6 +492,14 @@ class ReviewWorkflowTests(TestCase):
 			provider_name="provider-a",
 			model_name="model-a",
 			prompt_version="v1-detailed",
+			prompt_diagnostics={
+				"truncated": True,
+				"truncated_file_count": 1,
+				"files_sampled": 2,
+				"max_files": 8,
+				"total_chars_used": 40000,
+				"max_total_chars": 52000,
+			},
 			draft_feedback="<p>First draft body</p>",
 			draft_score=Decimal("85.00"),
 		)
@@ -500,6 +508,14 @@ class ReviewWorkflowTests(TestCase):
 			provider_name="provider-b",
 			model_name="model-b",
 			prompt_version="v1-single+review",
+			prompt_diagnostics={
+				"truncated": False,
+				"truncated_file_count": 0,
+				"files_sampled": 1,
+				"max_files": 8,
+				"total_chars_used": 12000,
+				"max_total_chars": 52000,
+			},
 			draft_feedback="<p>Second draft body</p>",
 			draft_score=Decimal("88.00"),
 		)
@@ -513,6 +529,9 @@ class ReviewWorkflowTests(TestCase):
 		self.assertContains(response, "Provider: provider-b")
 		self.assertContains(response, "Mode: Detailed multi-pass")
 		self.assertContains(response, "Mode: Single-pass + refinement")
+		self.assertContains(response, "Truncated: yes (1 file(s))")
+		self.assertContains(response, "Truncated: no")
+		self.assertContains(response, "Sampled 2/8 files, 40000/52000 chars")
 
 	@patch("grading.services.canvas_sync.OpenAICompatibleProvider")
 	def test_generate_ai_draft_records_generation_mode_in_prompt_version(self, mock_provider_cls):
@@ -522,6 +541,7 @@ class ReviewWorkflowTests(TestCase):
 			score=91,
 			provider_name="test-provider",
 			model_name="test-model",
+			prompt_diagnostics={"truncated": True, "truncated_file_count": 1},
 		)
 
 		generate_ai_draft(
@@ -533,6 +553,7 @@ class ReviewWorkflowTests(TestCase):
 		draft = self.first_submission.ai_drafts.order_by("-created_at").first()
 		self.assertIsNotNone(draft)
 		self.assertEqual(draft.prompt_version, "v1-detailed+review")
+		self.assertEqual(draft.prompt_diagnostics.get("truncated"), True)
 
 	def test_ai_provider_extracts_notebook_cells_for_prompt(self):
 		notebook_path = self._write_notebook(
@@ -569,6 +590,35 @@ class ReviewWorkflowTests(TestCase):
 		samples = provider._read_text_samples([SimpleNamespace(local_path=str(script_path))])
 
 		self.assertIn("LATE_PYTHON_MARKER", samples)
+
+	def test_ai_provider_preserves_file_tail_when_truncated(self):
+		script_path = Path(self.tempdir.name) / "tail_main.py"
+		script_path.write_text(("x = 1\n" * 5000) + "main_menu()\n", encoding="utf-8")
+		provider = object.__new__(OpenAICompatibleProvider)
+		samples = provider._read_text_samples(
+			[SimpleNamespace(local_path=str(script_path))],
+			max_chars_per_file=4000,
+			max_total_chars=4000,
+		)
+
+		self.assertIn("main_menu()", samples)
+
+	def test_ai_provider_preserves_notebook_tail_when_truncated(self):
+		notebook_path = self._write_notebook(
+			"tail_prompt_sample.ipynb",
+			[
+				{"cell_type": "markdown", "metadata": {}, "source": ["A" * 20000]},
+				{"cell_type": "code", "metadata": {}, "source": ["main_menu()\n"]},
+			],
+		)
+		provider = object.__new__(OpenAICompatibleProvider)
+		samples = provider._read_text_samples(
+			[SimpleNamespace(local_path=str(notebook_path))],
+			max_chars_per_file=5000,
+			max_total_chars=5000,
+		)
+
+		self.assertIn("main_menu()", samples)
 
 	def test_ai_provider_extracts_score_from_total_row(self):
 		provider = object.__new__(OpenAICompatibleProvider)

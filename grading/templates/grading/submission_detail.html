@@ -240,6 +240,8 @@
             <span class="meta-chip">Provider: {{ draft.provider_name }}</span>
             <span class="meta-chip">Model: {{ draft.model_name }}</span>
             <span class="meta-chip">Mode: {{ draft.generation_mode }}</span>
+            {% if draft.truncation_summary %}<span class="meta-chip">{{ draft.truncation_summary }}</span>{% endif %}
+            {% if draft.sampling_summary %}<span class="meta-chip">{{ draft.sampling_summary }}</span>{% endif %}
             {% if draft.draft_score is not None %}<span class="meta-chip">Score: {{ draft.draft_score }}</span>{% endif %}
           </div>
           <div class="draft-history-body">{{ draft.feedback_html|safe }}</div>

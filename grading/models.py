@@ -99,6 +99,7 @@ class AIFeedbackDraft(models.Model):
     provider_name = models.CharField(max_length=100)
     model_name = models.CharField(max_length=100)
     prompt_version = models.CharField(max_length=50, default="v1")
+    prompt_diagnostics = models.JSONField(default=dict, blank=True)
     draft_feedback = models.TextField()
     draft_score = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True)
     created_at = models.DateTimeField(default=timezone.now)

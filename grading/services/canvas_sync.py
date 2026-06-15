@@ -456,6 +456,7 @@ def generate_ai_draft(submission, use_review_pass=False, use_detailed_passes=Fal
             use_detailed_passes=use_detailed_passes,
             use_review_pass=use_review_pass,
         ),
+        prompt_diagnostics=getattr(result, "prompt_diagnostics", {}) or {},
         draft_feedback=result.feedback,
         draft_score=result.score,
     )
