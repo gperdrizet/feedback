@@ -468,6 +468,38 @@ def _generation_mode_label(prompt_version):
 	return "Single-pass"
 
 
+def _sampling_diagnostics_labels(prompt_diagnostics):
+	diagnostics = prompt_diagnostics or {}
+	if not diagnostics:
+		return {
+			"sampling_summary": None,
+			"truncation_summary": None,
+		}
+
+	files_sampled = diagnostics.get("files_sampled")
+	max_files = diagnostics.get("max_files")
+	total_chars = diagnostics.get("total_chars_used")
+	max_total_chars = diagnostics.get("max_total_chars")
+	truncated = bool(diagnostics.get("truncated"))
+	truncated_file_count = diagnostics.get("truncated_file_count", 0)
+
+	sampling_summary = (
+		f"Sampled {files_sampled}/{max_files} files, {total_chars}/{max_total_chars} chars"
+		if files_sampled is not None and max_files is not None and total_chars is not None and max_total_chars is not None
+		else None
+	)
+
+	if truncated:
+		truncation_summary = f"Truncated: yes ({truncated_file_count} file(s))"
+	else:
+		truncation_summary = "Truncated: no"
+
+	return {
+		"sampling_summary": sampling_summary,
+		"truncation_summary": truncation_summary,
+	}
+
+
 def gradebook(request):
 	assignments = AssignmentConfig.objects.select_related("course").prefetch_related("submissions")
 	return render(request, "grading/gradebook.html", {"assignments": assignments})
@@ -726,6 +758,8 @@ def submission_detail(request, submission_pk):
 					"provider_name": draft.provider_name,
 					"model_name": draft.model_name,
 					"generation_mode": _generation_mode_label(draft.prompt_version),
+					"sampling_summary": _sampling_diagnostics_labels(draft.prompt_diagnostics).get("sampling_summary"),
+					"truncation_summary": _sampling_diagnostics_labels(draft.prompt_diagnostics).get("truncation_summary"),
 					"draft_score": draft.draft_score,
 					"feedback_html": _sanitize_feedback_html(draft.draft_feedback),
 				}
