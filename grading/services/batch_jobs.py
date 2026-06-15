@@ -53,6 +53,9 @@ def claim_next_queued_job():
 def _ordered_assignment_submissions(assignment):
     latest_by_user = {}
     for submission in assignment.submissions.all():
+        if (submission.canvas_workflow_state or "").strip().lower() == "unsubmitted":
+            continue
+
         current = latest_by_user.get(submission.canvas_user_id)
         if current is None:
             latest_by_user[submission.canvas_user_id] = submission
@@ -94,17 +97,21 @@ def run_batch_review_job(job_pk):
         submissions = list(_ordered_assignment_submissions(assignment))
         job.total_submissions = len(submissions)
         job.save(update_fields=["total_submissions"])
+        skipped_submissions = 0
 
         for submission in submissions:
             job.current_student_name = submission.student_name
             job.save(update_fields=["current_student_name"])
             try:
-                generate_ai_draft(
+                generated = generate_ai_draft(
                     submission,
                     use_detailed_passes=job.use_detailed_passes,
                     use_review_pass=job.use_review_pass,
                 )
-                job.completed_submissions += 1
+                if generated:
+                    job.completed_submissions += 1
+                else:
+                    skipped_submissions += 1
             except Exception as exc:  # noqa: BLE001
                 job.failed_submissions += 1
                 job.last_error = f"{submission.student_name}: {exc}"
@@ -116,6 +123,7 @@ def run_batch_review_job(job_pk):
         job.current_student_name = ""
         job.summary_message = (
             f"Generated drafts for {job.completed_submissions} of {job.total_submissions} submissions."
+            + (f" {skipped_submissions} skipped." if skipped_submissions else "")
             + (f" {job.failed_submissions} failed." if job.failed_submissions else "")
         )
         job.save(update_fields=["status", "finished_at", "current_student_name", "summary_message"])
