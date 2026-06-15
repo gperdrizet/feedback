@@ -3,7 +3,7 @@
 import json
 import os
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -16,7 +16,7 @@ class AIDraftResult:
     score: float | None
     provider_name: str
     model_name: str
-    prompt_diagnostics: dict
+    prompt_diagnostics: dict = field(default_factory=dict)
 
 
 class OpenAICompatibleProvider:
