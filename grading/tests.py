@@ -188,6 +188,44 @@ class ReviewWorkflowTests(TestCase):
 		self.assertIn(99, rendered_ids)
 		self.assertNotIn(self.first_submission.canvas_submission_id, rendered_ids)
 
+	@patch("grading.services.canvas_sync._get_canvas_client")
+	def test_list_assignment_submissions_skips_unsubmitted(self, mock_get_canvas_client):
+		from grading.services.canvas_sync import list_assignment_submissions
+
+		submitted = SimpleNamespace(
+			id=1001,
+			user_id=11,
+			submission_type="online_text_entry",
+			workflow_state="submitted",
+			submitted_at="2026-06-01T10:00:00Z",
+			url="",
+			user={"id": 11, "name": "Alice"},
+			attachments=[],
+		)
+		unsubmitted = SimpleNamespace(
+			id=1002,
+			user_id=12,
+			submission_type="online_text_entry",
+			workflow_state="unsubmitted",
+			submitted_at=None,
+			url="",
+			user={"id": 12, "name": "Bob"},
+			attachments=[],
+		)
+
+		assignment = Mock()
+		assignment.get_submissions.return_value = [submitted, unsubmitted]
+		course = Mock()
+		course.get_assignment.return_value = assignment
+		canvas = Mock()
+		canvas.get_course.return_value = course
+		mock_get_canvas_client.return_value = canvas
+
+		payloads = list_assignment_submissions(course_id=101, assignment_id=202)
+
+		self.assertEqual(len(payloads), 1)
+		self.assertEqual(payloads[0]["user_id"], 11)
+
 	def test_delete_assignment_removes_record(self):
 		response = self.client.post(reverse("grading:delete_assignment", args=[self.assignment.pk]))
 
@@ -293,6 +331,19 @@ class ReviewWorkflowTests(TestCase):
 			use_detailed_passes=True,
 		)
 
+	@patch("grading.views.generate_ai_draft")
+	def test_submission_generate_skips_unsubmitted_record(self, mock_generate):
+		self.first_submission.canvas_workflow_state = "unsubmitted"
+		self.first_submission.save(update_fields=["canvas_workflow_state"])
+
+		response = self.client.post(
+			reverse("grading:submission_detail", args=[self.first_submission.pk]),
+			{"action": "generate"},
+		)
+
+		self.assertEqual(response.status_code, 302)
+		mock_generate.assert_not_called()
+
 	@patch("grading.services.canvas_sync.post_submission_grade")
 	def test_post_to_canvas_sends_html_comment(self, mock_post_grade):
 		mock_post_grade.return_value = {"ok": True}
@@ -325,6 +376,36 @@ class ReviewWorkflowTests(TestCase):
 
 		self.assertEqual(response["ok"], True)
 		self.assertIsInstance(response["canvas_response"], str)
+
+	@patch("grading.views.post_submission_to_canvas")
+	def test_submission_post_skips_unsubmitted_record(self, mock_post):
+		self.first_submission.canvas_workflow_state = "unsubmitted"
+		self.first_submission.save(update_fields=["canvas_workflow_state"])
+
+		response = self.client.post(
+			reverse("grading:submission_detail", args=[self.first_submission.pk]),
+			{
+				"action": "post",
+				"final_score": "87",
+				"final_feedback": "Should not post",
+			},
+		)
+
+		self.assertEqual(response.status_code, 302)
+		mock_post.assert_not_called()
+
+	@patch("grading.services.canvas_sync.post_submission_grade")
+	def test_post_to_canvas_skips_unsubmitted_record(self, mock_post_grade):
+		self.first_submission.canvas_workflow_state = "unsubmitted"
+		self.first_submission.review_status = SubmissionRecord.ReviewStatus.APPROVED
+		self.first_submission.final_score = Decimal("87.00")
+		self.first_submission.save(update_fields=["canvas_workflow_state", "review_status", "final_score"])
+
+		response = post_submission_to_canvas(self.first_submission)
+
+		self.assertEqual(response["success"], True)
+		self.assertEqual(response["skipped"], True)
+		mock_post_grade.assert_not_called()
 
 	def test_submission_review_renders_local_notebook_artifact(self):
 		notebook_path = self._write_notebook(

@@ -21,6 +21,7 @@ from grading.services.batch_jobs import enqueue_batch_review_job
 from grading.services.canvas_sync import (
 	approve_submission,
 	generate_ai_draft,
+	_is_unsubmitted_record,
 	post_submission_to_canvas,
 	sync_assignment as sync_assignment_from_canvas,
 )
@@ -645,6 +646,9 @@ def submission_detail(request, submission_pk):
 			submission.save(update_fields=["model_adjustments", "model_adjustments_last_used_at"])
 		try:
 			if action == "generate":
+				if _is_unsubmitted_record(submission):
+					messages.info(request, "No submission found for this student in Canvas. Skipped draft generation.")
+					return redirect("grading:submission_detail", submission_pk=submission.pk)
 				use_review_pass = request.POST.get("use_review_pass") == "1"
 				use_detailed_passes = request.POST.get("use_detailed_passes") == "1"
 				generate_ai_draft(
@@ -675,6 +679,9 @@ def submission_detail(request, submission_pk):
 				)
 				messages.success(request, "Submission approved and queued for posting.")
 			elif action == "post":
+				if _is_unsubmitted_record(submission):
+					messages.info(request, "No submission found for this student in Canvas. Skipped posting.")
+					return redirect("grading:submission_detail", submission_pk=submission.pk)
 				submission.final_feedback = _sanitize_feedback_html(
 					request.POST.get("final_feedback", submission.final_feedback or submission.proposed_feedback)
 				)

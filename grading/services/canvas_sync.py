@@ -53,6 +53,18 @@ def _latest_submissions_per_user(submissions):
     return list(latest_by_user.values())
 
 
+def _is_unsubmitted_workflow_state(workflow_state):
+    return (workflow_state or "").strip().lower() == "unsubmitted"
+
+
+def _is_unsubmitted_canvas_submission(submission):
+    return _is_unsubmitted_workflow_state(getattr(submission, "workflow_state", ""))
+
+
+def _is_unsubmitted_record(submission):
+    return _is_unsubmitted_workflow_state(submission.canvas_workflow_state)
+
+
 def _coerce_jsonable(value):
     return json.loads(json.dumps(value, default=str))
 
@@ -164,6 +176,9 @@ def list_assignment_submissions(course_id, assignment_id, include_history=True):
     payloads = []
     submissions = _latest_submissions_per_user(assignment.get_submissions(include=include))
     for submission in submissions:
+        if _is_unsubmitted_canvas_submission(submission):
+            continue
+
         user = getattr(submission, "user", None)
         attachments = []
         for attachment in getattr(submission, "attachments", []) or []:
@@ -227,6 +242,9 @@ def download_submission_artifacts(course_id, assignment_id, output_dir=".", incl
     )
 
     for submission in submissions:
+        if _is_unsubmitted_canvas_submission(submission):
+            continue
+
         user = getattr(submission, "user", None)
         user_name = "unknown_user"
         if isinstance(user, dict):
@@ -398,6 +416,12 @@ def _prompt_version_for_generation_mode(use_detailed_passes=False, use_review_pa
 
 
 def generate_ai_draft(submission, use_review_pass=False, use_detailed_passes=False):
+    if _is_unsubmitted_record(submission):
+        submission.ai_status = SubmissionRecord.AIStatus.NOT_STARTED
+        submission.last_error = ""
+        submission.save(update_fields=["ai_status", "last_error"])
+        return False
+
     provider = OpenAICompatibleProvider()
     submission.ai_status = SubmissionRecord.AIStatus.PROCESSING
     submission.last_error = ""
@@ -453,6 +477,7 @@ def generate_ai_draft(submission, use_review_pass=False, use_detailed_passes=Fal
             "model_adjustments_last_used_at",
         ]
     )
+    return True
 
 
 def approve_submission(submission, instructor_username, notes=""):
@@ -470,6 +495,13 @@ def approve_submission(submission, instructor_username, notes=""):
 
 
 def post_submission_to_canvas(submission):
+    if _is_unsubmitted_record(submission):
+        return {
+            "success": True,
+            "skipped": True,
+            "reason": "No submission present in Canvas; skipping post.",
+        }
+
     if submission.review_status != SubmissionRecord.ReviewStatus.APPROVED:
         raise ValueError("Submission must be approved before posting to Canvas.")
 
