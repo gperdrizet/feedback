@@ -549,9 +549,9 @@ class ReviewWorkflowTests(TestCase):
 		self.assertContains(response, "Provider: provider-b")
 		self.assertContains(response, "Mode: Detailed multi-pass")
 		self.assertContains(response, "Mode: Single-pass + refinement")
-		self.assertContains(response, "Truncated: yes (1 file(s))")
-		self.assertContains(response, "Truncated: no")
-		self.assertContains(response, "Sampled 2/8 files, 40000/52000 chars")
+		self.assertContains(response, "1 file(s) truncated")
+		self.assertContains(response, "No files truncated")
+		self.assertContains(response, "Included 2 of 8 max files (40,000 of 52,000 chars)")
 
 	def test_submission_editor_falls_back_to_latest_draft_feedback(self):
 		self.first_submission.final_feedback = ""

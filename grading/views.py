@@ -497,15 +497,15 @@ def _sampling_diagnostics_labels(prompt_diagnostics):
 	truncated_file_count = diagnostics.get("truncated_file_count", 0)
 
 	sampling_summary = (
-		f"Sampled {files_sampled}/{max_files} files, {total_chars}/{max_total_chars} chars"
+		f"Included {files_sampled} of {max_files} max files ({total_chars:,} of {max_total_chars:,} chars)"
 		if files_sampled is not None and max_files is not None and total_chars is not None and max_total_chars is not None
 		else None
 	)
 
 	if truncated:
-		truncation_summary = f"Truncated: yes ({truncated_file_count} file(s))"
+		truncation_summary = f"{truncated_file_count} file(s) truncated"
 	else:
-		truncation_summary = "Truncated: no"
+		truncation_summary = "No files truncated"
 
 	return {
 		"sampling_summary": sampling_summary,
