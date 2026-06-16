@@ -1,14 +1,20 @@
 # feedback
 
-Django-based instructor interface for AI-assisted grading workflows on Canvas assignments. Uses [canvas-instructor-tools](https://github.com/gperdrizet/canvas-instructor-tools) for Canvas API interactions.
+Django-based instructor interface for AI-assisted grading workflows on Canvas assignments. Uses [canvas-instructor-tools](https://github.com/gperdrizet/canvas-instructor-tools) for Canvas API interactions and integrates with OpenAI-compatible AI providers (Promptly, OpenAI, etc.).
 
-## Current MVP Scope
+## Features
 
-- Sync assignment submissions from Canvas using `canvas-instructor-tools`
-- Download file attachments and URL submissions into local storage
-- Generate draft AI feedback (provider contract ready; placeholder implementation included)
-- Require instructor approval before posting grade/comment
-- Post approved outcomes back to Canvas
+- **Canvas Integration**: Sync assignments, download submissions (files + URL content), and post grades/comments back
+- **AI Feedback Generation**: Generate draft feedback using OpenAI-compatible providers with rubric-aware scoring
+- **Smart Sampling**: Head+tail file truncation preserves beginning and end of long files (configurable limits)
+- **Batch Processing**: Background job queue for bulk draft generation across all students
+- **Cohort Summary**: Async generation of assignment-level analysis from student feedback
+- **Approval Workflow**: Require instructor review before posting any grade/comment to Canvas
+- **Diagnostics**: Track file sampling, truncation, and prompt token usage per draft
+- **Unsubmitted Handling**: Automatically skip students with no submission
+- **Multi-pass Generation**: Optional detailed analysis and refinement passes
+- **Draft History**: Review all previous AI-generated drafts with metadata (provider, model, mode)
+- **Rubric Support**: Define scoring criteria with point scales; AI applies rubric in structured table format
 
 ## Setup
 
@@ -36,25 +42,73 @@ Django-based instructor interface for AI-assisted grading workflows on Canvas as
 
 ## Environment Variables
 
+### Canvas Configuration
+
 - `CANVAS_API_URL`: Canvas base URL
 - `CANVAS_API_KEY`: Canvas API token
+
+### AI Provider Configuration
+
 - `FEEDBACK_AI_API_KEY`: Promptly API key (`sk-...`)
 - `FEEDBACK_AI_BASE_URL`: defaults to `https://promptlyapi.com/v1`
 - `FEEDBACK_AI_MODEL`: defaults to `default` (Promptly accepts but may ignore)
 - `FEEDBACK_AI_TEMPERATURE`: optional, defaults to `0.2`
+- `OPENAI_API_KEY`: fallback if `FEEDBACK_AI_API_KEY` is not set
+
+### Prompt Sampling Limits
+
+- `FEEDBACK_MAX_PROMPT_FILES`: max files to include (default: `8`)
+- `FEEDBACK_MAX_PROMPT_FILE_CHARS`: max chars per file (default: `24000`)
+- `FEEDBACK_MAX_PROMPT_TOTAL_CHARS`: total char budget (default: `52000`)
+
+### Django Configuration
+
 - `FEEDBACK_SECRET_KEY`: Django secret key override
 - `FEEDBACK_DEBUG`: `true`/`false`
 - `FEEDBACK_ALLOWED_HOSTS`: comma-separated hosts
+- `FEEDBACK_CSRF_TRUSTED_ORIGINS`: for HTTPS deployments
+- `FEEDBACK_BIND_PORT`: Docker bind port (default: `18080`)
 
-You can also use `OPENAI_API_KEY` as a fallback if `FEEDBACK_AI_API_KEY` is not set.
+### Database Configuration (Docker)
+
+- `POSTGRES_USER`
+- `POSTGRES_PASSWORD`
+- `POSTGRES_DB`
 
 ## Workflow
 
-1. Sync an assignment by Canvas `course_id` and `assignment_id`.
-2. Open a submission and generate AI draft feedback.
-3. Edit score/feedback as needed.
-4. Approve the submission.
-5. Post to Canvas.
+### Individual Submission
+
+1. Sync an assignment by Canvas `course_id` and `assignment_id`
+2. Open a submission and generate AI draft feedback
+3. Review diagnostics (files included, truncation status)
+4. Edit score/feedback as needed
+5. Approve and post to Canvas
+
+### Batch Processing
+
+1. Configure rubric and additional instructions on assignment page
+2. Click "Batch Download & Generate Drafts" (optional: enable multi-pass or refinement)
+3. Background worker processes all submissions
+4. Monitor progress with live polling UI
+5. Review and approve individual submissions
+
+### Cohort Summary
+
+1. Generate student feedback drafts first
+2. Click "Generate Cohort Summary (Background)"
+3. AI analyzes all feedback to identify common patterns, strengths, and mistakes
+4. Summary appears automatically when generation completes
+
+### Background Worker
+
+Run the worker process to handle batch and cohort summary jobs:
+
+```bash
+python manage.py process_batch_jobs
+```
+
+For production, run as a systemd service or Docker container.
 
 ## Docker Deployment (VPS)
 
