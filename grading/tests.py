@@ -533,6 +533,24 @@ class ReviewWorkflowTests(TestCase):
 		self.assertContains(response, "Truncated: no")
 		self.assertContains(response, "Sampled 2/8 files, 40000/52000 chars")
 
+	def test_submission_editor_falls_back_to_latest_draft_feedback(self):
+		self.first_submission.final_feedback = ""
+		self.first_submission.proposed_feedback = ""
+		self.first_submission.save(update_fields=["final_feedback", "proposed_feedback"])
+
+		AIFeedbackDraft.objects.create(
+			submission=self.first_submission,
+			provider_name="provider-fallback",
+			model_name="model-fallback",
+			prompt_version="v1-single",
+			draft_feedback="<p>Fallback draft content</p>",
+		)
+
+		response = self.client.get(reverse("grading:submission_detail", args=[self.first_submission.pk]))
+
+		self.assertContains(response, "Fallback draft content")
+		self.assertIn("Fallback draft content", response.context["editor_feedback_html"])
+
 	@patch("grading.services.canvas_sync.OpenAICompatibleProvider")
 	def test_generate_ai_draft_records_generation_mode_in_prompt_version(self, mock_provider_cls):
 		provider = mock_provider_cls.return_value

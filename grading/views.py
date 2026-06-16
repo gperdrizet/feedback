@@ -468,6 +468,19 @@ def _generation_mode_label(prompt_version):
 	return "Single-pass"
 
 
+def _editor_feedback_html(submission):
+	if submission.final_feedback:
+		return _sanitize_feedback_html(submission.final_feedback)
+	if submission.proposed_feedback:
+		return _sanitize_feedback_html(submission.proposed_feedback)
+
+	latest_draft = submission.ai_drafts.order_by("-created_at").first()
+	if latest_draft and latest_draft.draft_feedback:
+		return _sanitize_feedback_html(latest_draft.draft_feedback)
+
+	return ""
+
+
 def _sampling_diagnostics_labels(prompt_diagnostics):
 	diagnostics = prompt_diagnostics or {}
 	if not diagnostics:
@@ -737,9 +750,7 @@ def submission_detail(request, submission_pk):
 		"grading/submission_detail.html",
 		{
 			"submission": submission,
-			"editor_feedback_html": _sanitize_feedback_html(
-				submission.final_feedback or submission.proposed_feedback
-			),
+			"editor_feedback_html": _editor_feedback_html(submission),
 			"proposed_score_distribution": _proposed_score_distribution(ordered_submissions),
 			"ordered_submissions": ordered_submissions,
 			"previous_submission_pk": previous_submission_pk,
