@@ -138,10 +138,11 @@ class ReviewWorkflowTests(TestCase):
 		self.assertContains(response, "Evidence Pass")
 		self.assertContains(response, "Consistency Pass")
 
-	@patch("grading.views.generate_assignment_cohort_summary")
-	def test_assignment_cohort_summary_generation_saves_rendered_summary(self, mock_generate_summary):
+	@patch("grading.views.enqueue_cohort_summary_job")
+	def test_assignment_cohort_summary_generation_enqueues_job(self, mock_enqueue):
 		self.assignment.cohort_summary_html = "<p>Cohort quality is strong overall.</p>"
 		self.assignment.save(update_fields=["cohort_summary_html"])
+		mock_enqueue.return_value = (Mock(), True)
 
 		response = self.client.post(
 			reverse("grading:assignment_detail", args=[self.assignment.pk]),
@@ -149,22 +150,41 @@ class ReviewWorkflowTests(TestCase):
 		)
 
 		self.assertEqual(response.status_code, 302)
-		mock_generate_summary.assert_called_once()
+		mock_enqueue.assert_called_once()
 		follow = self.client.get(reverse("grading:assignment_detail", args=[self.assignment.pk]))
 		self.assertContains(follow, "Cohort Summary")
 		self.assertContains(follow, "Cohort quality is strong overall")
 
-	@patch("grading.views.generate_assignment_cohort_summary", side_effect=ValueError("No generated feedback exists yet."))
-	def test_assignment_cohort_summary_generation_failure_is_reported(self, mock_generate_summary):
+	@patch("grading.views.enqueue_cohort_summary_job")
+	def test_assignment_cohort_summary_generation_duplicate_job_is_reported(self, mock_enqueue):
+		mock_enqueue.return_value = (Mock(), False)
+
 		response = self.client.post(
 			reverse("grading:assignment_detail", args=[self.assignment.pk]),
 			{"action": "generate_cohort_summary"},
 		)
 
 		self.assertEqual(response.status_code, 302)
-		mock_generate_summary.assert_called_once()
-		self.assignment.refresh_from_db()
-		self.assertIn("No generated feedback exists yet", self.assignment.cohort_summary_last_error)
+		mock_enqueue.assert_called_once()
+
+	def test_assignment_cohort_summary_status_endpoint_returns_job_status(self):
+		from grading.models import CohortSummaryJob
+		job = CohortSummaryJob.objects.create(
+			assignment=self.assignment,
+			status=CohortSummaryJob.Status.RUNNING,
+			summary_message="Generating...",
+		)
+
+		response = self.client.get(
+			reverse("grading:assignment_cohort_summary_status", args=[self.assignment.pk]),
+			headers={"Accept": "application/json"},
+		)
+
+		self.assertEqual(response.status_code, 200)
+		data = response.json()
+		self.assertIn("job", data)
+		self.assertEqual(data["job"]["status"], "running")
+		self.assertEqual(data["job"]["summary_message"], "Generating...")
 
 	def test_assignment_views_use_latest_submission_per_student(self):
 		SubmissionRecord.objects.create(

@@ -172,3 +172,20 @@ class BatchReviewJob(models.Model):
     finished_at = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
+
+
+class CohortSummaryJob(models.Model):
+    class Status(models.TextChoices):
+        QUEUED = "queued", "Queued"
+        RUNNING = "running", "Running"
+        COMPLETED = "completed", "Completed"
+        FAILED = "failed", "Failed"
+
+    assignment = models.ForeignKey(AssignmentConfig, on_delete=models.CASCADE, related_name="cohort_summary_jobs")
+    status = models.CharField(max_length=20, choices=Status.choices, default=Status.QUEUED)
+    summary_message = models.TextField(blank=True)
+    last_error = models.TextField(blank=True)
+    started_at = models.DateTimeField(null=True, blank=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+    created_at = models.DateTimeField(default=timezone.now)
+    updated_at = models.DateTimeField(auto_now=True)

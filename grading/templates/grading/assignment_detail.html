@@ -133,19 +133,29 @@
     <form method="post" class="actions">
       {% csrf_token %}
       <input type="hidden" name="action" value="generate_cohort_summary">
-      <button type="submit" class="button">Generate Cohort Summary</button>
+      <button type="submit" class="button">Generate Cohort Summary (Background)</button>
     </form>
+    <div id="cohort-summary-progress" data-status-url="{% url 'grading:assignment_cohort_summary_status' assignment.pk %}">
+      <div id="cohort-job-status" class="job-status">
+        {% if latest_cohort_summary_job %}
+          Latest summary job: {{ latest_cohort_summary_job.status }}
+        {% else %}
+          No cohort summary job has run yet.
+        {% endif %}
+      </div>
+      <div id="cohort-summary-message" class="job-status"></div>
+      <div id="cohort-last-error" class="job-status error"></div>
+    </div>
     {% if assignment.cohort_summary_generated_at %}
       <div class="cohort-summary-meta">Last generated: {{ assignment.cohort_summary_generated_at|date:"Y-m-d H:i" }}</div>
     {% endif %}
-    {% if assignment.cohort_summary_last_error %}
-      <div class="cohort-summary-error">Last error: {{ assignment.cohort_summary_last_error }}</div>
-    {% endif %}
-    {% if cohort_summary_html %}
-      <div class="cohort-summary-body">{{ cohort_summary_html|safe }}</div>
-    {% else %}
-      <p class="muted">No cohort summary yet.</p>
-    {% endif %}
+    <div id="cohort-summary-body" class="cohort-summary-body">
+      {% if cohort_summary_html %}
+        {{ cohort_summary_html|safe }}
+      {% else %}
+        <p class="muted">No cohort summary yet.</p>
+      {% endif %}
+    </div>
   </div>
 
   {{ rubric_data|json_script:"rubric-initial-data" }}
@@ -399,6 +409,59 @@
       }
 
       pollStatus();
+    })();
+
+    // Cohort summary polling
+    (function () {
+      const progressEl = document.getElementById("cohort-summary-progress");
+      if (!progressEl) {
+        return;
+      }
+
+      const statusUrl = progressEl.getAttribute("data-status-url");
+      if (!statusUrl) {
+        return;
+      }
+
+      const statusEl = document.getElementById("cohort-job-status");
+      const summaryMessageEl = document.getElementById("cohort-summary-message");
+      const errorEl = document.getElementById("cohort-last-error");
+      const bodyEl = document.getElementById("cohort-summary-body");
+
+      function renderCohortJob(job, cohortHtml) {
+        if (!job) {
+          statusEl.textContent = "No cohort summary job has run yet.";
+          summaryMessageEl.textContent = "";
+          errorEl.textContent = "";
+          return false;
+        }
+
+        statusEl.textContent = `Latest summary job: ${job.status}`;
+        summaryMessageEl.textContent = job.summary_message || "";
+        errorEl.textContent = job.last_error || "";
+
+        if (job.status === "completed" && cohortHtml) {
+          bodyEl.innerHTML = cohortHtml;
+        }
+
+        return job.status === "queued" || job.status === "running";
+      }
+
+      function pollCohortStatus() {
+        fetch(statusUrl, { headers: { "Accept": "application/json" } })
+          .then((response) => response.json())
+          .then((payload) => {
+            const keepPolling = renderCohortJob(payload.job, payload.cohort_summary_html);
+            if (keepPolling) {
+              window.setTimeout(pollCohortStatus, 2000);
+            }
+          })
+          .catch(() => {
+            window.setTimeout(pollCohortStatus, 4000);
+          });
+      }
+
+      pollCohortStatus();
     })();
   </script>
 </body>

@@ -25,7 +25,7 @@ from grading.services.canvas_sync import (
 	post_submission_to_canvas,
 	sync_assignment as sync_assignment_from_canvas,
 )
-from grading.services.cohort_summary import generate_assignment_cohort_summary
+from grading.services.cohort_summary_jobs import enqueue_cohort_summary_job
 from grading.services.http_safety import fetch_remote_text, get_max_preview_bytes
 
 
@@ -611,18 +611,17 @@ def assignment_detail(request, assignment_pk):
 			except (json.JSONDecodeError, ValueError, TypeError) as exc:
 				messages.error(request, f"Failed to save rubric: {exc}")
 		elif action == "generate_cohort_summary":
-			try:
-				generate_assignment_cohort_summary(assignment)
-				messages.success(request, "Cohort summary generated.")
-			except Exception as exc:  # noqa: BLE001
-				assignment.cohort_summary_last_error = str(exc)
-				assignment.save(update_fields=["cohort_summary_last_error"])
-				messages.error(request, f"Failed to generate cohort summary: {exc}")
+			job, created = enqueue_cohort_summary_job(assignment)
+			if created:
+				messages.success(request, "Cohort summary queued for background generation.")
+			else:
+				messages.info(request, "A cohort summary job is already running for this assignment.")
 
 		return redirect("grading:assignment_detail", assignment_pk=assignment.pk)
 
 	submissions = _ordered_assignment_submissions(assignment)
 	latest_job = assignment.batch_jobs.order_by("-created_at").first()
+	latest_cohort_summary_job = assignment.cohort_summary_jobs.order_by("-created_at").first()
 	rubric_criteria = list(assignment.rubric_criteria.prefetch_related("levels").all())
 	rubric_data = [
 		{
@@ -641,6 +640,7 @@ def assignment_detail(request, assignment_pk):
 			"assignment": assignment,
 			"submissions": submissions,
 			"latest_batch_job": latest_job,
+			"latest_cohort_summary_job": latest_cohort_summary_job,
 			"latest_batch_mode": _batch_mode_label(
 				latest_job.use_detailed_passes,
 				latest_job.use_review_pass,
@@ -662,6 +662,28 @@ def assignment_batch_status(request, assignment_pk):
 		{
 			"job": _serialize_batch_job(latest_job),
 			"submissions": [_serialize_submission_row(submission) for submission in submissions],
+		}
+	)
+
+
+def assignment_cohort_summary_status(request, assignment_pk):
+	assignment = get_object_or_404(AssignmentConfig, pk=assignment_pk)
+	latest_job = assignment.cohort_summary_jobs.order_by("-created_at").first()
+
+	if not latest_job:
+		return JsonResponse({"job": None, "cohort_summary_html": ""})
+
+	return JsonResponse(
+		{
+			"job": {
+				"id": latest_job.pk,
+				"status": latest_job.status,
+				"summary_message": latest_job.summary_message,
+				"last_error": latest_job.last_error,
+				"started_at": latest_job.started_at.isoformat() if latest_job.started_at else None,
+				"finished_at": latest_job.finished_at.isoformat() if latest_job.finished_at else None,
+			},
+			"cohort_summary_html": _sanitize_feedback_html(assignment.cohort_summary_html) if latest_job.status == "completed" else "",
 		}
 	)
 
