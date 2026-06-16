@@ -1,6 +1,6 @@
 # feedback
 
-Django-based instructor interface for AI-assisted grading workflows on Canvas assignments.
+Django-based instructor interface for AI-assisted grading workflows on Canvas assignments. Uses [canvas-instructor-tools](https://github.com/gperdrizet/canvas-instructor-tools) for Canvas API interactions.
 
 ## Current MVP Scope
 
